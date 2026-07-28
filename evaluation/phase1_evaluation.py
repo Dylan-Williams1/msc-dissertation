@@ -7,17 +7,17 @@ import pandas as pd
 import scipy.stats as stats
 
 # =========================================================
-# 0. ANCHOR ALL PATHS TO THIS SCRIPT'S OWN FOLDER
+# 0. ANCHOR ALL PATHS TO THEIR RESPECTIVE FOLDERS
 # =========================================================
-# Relying on the current working directory is fragile — it depends on
-# whether you launch this via terminal, double-click, or an IDE's "Run"
-# button, each of which can set a different cwd. Anchoring to the script's
-# own location makes behaviour identical no matter how it's launched.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-META_PATH = os.path.join(SCRIPT_DIR, "meta.json")
-PARQUET_PATH = os.path.join(SCRIPT_DIR, "daily_ohlcv.parquet")
-CONSTITUENTS_PATH = os.path.join(SCRIPT_DIR, "constituents.csv")
+# Navigate up one level from 'evaluation', then into 'data'
+DATA_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "data")
+
+# Point the data files to the DATA_DIR
+META_PATH = os.path.join(DATA_DIR, "meta.json")
+PARQUET_PATH = os.path.join(DATA_DIR, "daily_ohlcv.parquet")
+CONSTITUENTS_PATH = os.path.join(DATA_DIR, "constituents.csv")
 
 # =========================================================
 # 1. LOAD & CLEAN DATA (previously a separate script)
@@ -42,7 +42,7 @@ df_price.dropna(subset=["close"], inplace=True)
 df_price["returns"] = df_price.groupby(level="symbol")["close"].pct_change()
 
 print("\n--- OHLCV DATASET ---")
-print(df_price.info())
+#print(df_price.info())
 date_level = df_price.index.get_level_values("date")
 print(f"Total Date Range: {date_level.min().date()} to {date_level.max().date()}")
 
@@ -51,8 +51,8 @@ if os.path.exists(CONSTITUENTS_PATH):
     df_constituents = pd.read_csv(CONSTITUENTS_PATH)
     # Prevent look-ahead bias: drop any current market_cap/weight columns
     df_constituents.drop(columns=["market_cap", "weight"], inplace=True, errors="ignore")
-    print("\n--- CONSTITUENTS DATASET ---")
-    print(df_constituents.head())
+    #print("\n--- CONSTITUENTS DATASET ---")
+    #print(df_constituents.head())
 else:
     df_constituents = None
     print("\n(no constituents.csv found — skipping universe filter)")
@@ -61,16 +61,23 @@ else:
 # 2. BATCH EVALUATE ALL GENERATED ALPHAS
 # =========================================================
 
-output_dir = SCRIPT_DIR  # alpha_*.json files live alongside this script
+# Set this variable to the specific model folder you want to evaluate
+TARGET_MODEL = "gemini-3.6-flash"  # Change to "gemini-3.6-flash" when needed
+
+# Navigate up one level from 'evaluation', then into 'alphas/raw/<TARGET_MODEL>'
+output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "alphas", "raw", TARGET_MODEL)
 results = []
 
-json_files = glob.glob(os.path.join(output_dir, "*.json"))
-print(f"\nFound {len(json_files)} alpha JSON files to evaluate.")
+# Look for all .json files directly inside that specific folder
+search_pattern = os.path.join(output_dir, "*.json")
+json_files = glob.glob(search_pattern)
+
+print(f"\nFound {len(json_files)} alpha JSON files to evaluate in {TARGET_MODEL}.")
 
 if len(json_files) == 0:
     raise FileNotFoundError(
-        f"No alpha_*.json files found in {output_dir}. "
-        "Check that your generated alpha files are actually in this folder."
+        f"No .json files found in {output_dir}. "
+        "Check that your generated alpha files are actually in this directory."
     )
 
 # --- Pre-scan pass: count trials PER MODEL, not pooled across the folder ---
