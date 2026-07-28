@@ -1,0 +1,17 @@
+# Secrets — never commit real API keys
+.env
+
+# Large / regeneratable data files
+data/daily_ohlcv.parquet
+data/*.csv.gz
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS/editor cruft
+.DS_Store
+.idea/
+.vscode/

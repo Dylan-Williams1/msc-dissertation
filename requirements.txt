@@ -1,0 +1,6 @@
+pandas
+numpy
+scipy
+pyarrow
+python-dotenv
+google-genai

@@ -1,0 +1,38 @@
+{
+  "dataset": "S&P 500 current members \u2014 daily OHLCV (max available)",
+  "index": "SP500",
+  "membership": "current constituents only (not point-in-time historical membership)",
+  "as_of": "2026-07-16",
+  "membership_effective_date": "2026-07-14",
+  "n_constituents": 503,
+  "price_start_requested": "1990-01-01",
+  "price_end_exclusive": "2026-07-17",
+  "datacentre_daily_floor": "1990-01-01",
+  "interval": "1d",
+  "source": "SimicX DataCentre \u2192 QuestDB US_stock_etf_daily_ohlcv (FMP-sourced)",
+  "row_count": 3674585,
+  "symbol_count_with_prices": 503,
+  "date_min": "1990-01-02",
+  "date_max": "2026-07-16",
+  "coverage_thresholds": {
+    "ge_10y": 468,
+    "ge_20y": 399,
+    "ge_30y": 312,
+    "from_1990": 244
+  },
+  "missing_symbols": [],
+  "truncated_symbols": [],
+  "retrieved_at_utc": "2026-07-16T16:00:26Z",
+  "files": {
+    "constituents.csv": "Current SP500 membership + metadata",
+    "daily_ohlcv.parquet": "Primary panel",
+    "daily_ohlcv.csv.gz": "Same panel, gzip CSV",
+    "coverage_by_symbol.csv": "Per-ticker span",
+    "meta.json": "This file"
+  },
+  "notes": [
+    "US daily OHLCV in DataCentre starts 1990-01-01; cannot extend earlier from this source.",
+    "IPO/spinoff names have shorter histories by construction.",
+    "Close is split-adjusted, not dividend-adjusted (DataCentre convention)."
+  ]
+}
