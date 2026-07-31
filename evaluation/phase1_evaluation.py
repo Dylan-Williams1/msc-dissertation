@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+
+# VARIABLES TO SET BEFORE RUNNING
+TARGET_MODEL = "gemini-3.6-flash-v2"  # Change to "gemini-3.6-flash" when needed
+
 # =========================================================
 # 0. ANCHOR ALL PATHS TO THEIR RESPECTIVE FOLDERS
 # =========================================================
@@ -60,9 +64,6 @@ else:
 # =========================================================
 # 2. BATCH EVALUATE ALL GENERATED ALPHAS
 # =========================================================
-
-# Set this variable to the specific model folder you want to evaluate
-TARGET_MODEL = "gemini-3.6-flash"  # Change to "gemini-3.6-flash" when needed
 
 # Navigate up one level from 'evaluation', then into 'alphas/raw/<TARGET_MODEL>'
 output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "alphas", "raw", TARGET_MODEL)
@@ -173,7 +174,6 @@ for file_path in json_files:
         # Calculate raw DSR
         dsr_raw = stats.norm.cdf(z_score)
         
-        # --- NEW: ACADEMIC FORMATTING ---
         # Bound the float to prevent suspicious-looking 1.0s and 0.0s
         dsr_bounded = float(np.clip(dsr_raw, 0.0001, 0.9999))
         
@@ -214,7 +214,7 @@ for file_path in json_files:
 # =========================================================
 
 df_results = pd.DataFrame(results)
-csv_output_path = "phase1_screening_results.csv"
+csv_output_path = "phase1_screening_results_" + TARGET_MODEL + ".csv"
 df_results.to_csv(csv_output_path, index=False)
 
 print("\n--- BATCH EVALUATION COMPLETE ---")
