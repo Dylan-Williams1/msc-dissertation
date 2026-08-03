@@ -11,6 +11,10 @@ Every API call produces exactly one artifact on disk — a success record or a
 failure record. Validation flags problems in metadata; it never filters. Any
 filtering performed later must be an explicit, documented, post-hoc step so
 that `selection_applied` remains truthfully False at the generation boundary.
+
+Theme conditioning (user prompt v4.0) narrows the economic mechanism the model
+is asked to target. It does NOT discard outputs, so `selection_applied` remains
+truthfully False: the prompt is conditioned, nothing is filtered.
 """
 
 import os
@@ -33,7 +37,7 @@ api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     raise EnvironmentError(
         "GEMINI_API_KEY not set. Put GEMINI_API_KEY=<your_key> in a .env file "
-        "next to this script (never hardcode it in source, never paste it into "
+        "next to this script (never hardcode it in source, never paste it 1into "
         "chat, and rotate immediately if it is ever exposed either way)."
     )
 
@@ -44,13 +48,15 @@ if not api_key:
 MODEL_NAME = "gemini-3.6-flash"
 PROVIDER = "Google"
 INTERFACE = "API"                 # Section 3b: browser interfaces are prohibited
-TEMPERATURE = 0.7
-N_ALPHAS = 20
+TEMPERATURE = 0.9
 N_SAMPLES_PER_PROMPT = 1          # one draw kept per call; no best-of selection
 SELECTION_APPLIED = False         # invariant enforced by the no-discard rule
 RETRIEVAL_AUGMENTATION_ENABLED = False
 THINKING_LEVEL = "medium"         # recorded: affects reproducibility, not disclosed by default
 MASTER_SEED = 20260716            # per-call seeds derived from this, all recorded
+
+# N_ALPHAS is NOT set here. It is defined by CALL_PLAN in section 4b so that
+# the planned call count and the theme cell structure cannot drift apart.
 
 # ---------------------------------------------------------------------------
 # 2. KNOWLEDGE CUTOFF — THE TREATMENT VARIABLE
@@ -71,7 +77,7 @@ MODEL_KNOWLEDGE_CUTOFF = "2026-03"           # VERIFY against the model card bef
 MODEL_KNOWLEDGE_CUTOFF_LOWER = "2025-01"     # earliest plausible cutoff
 MODEL_KNOWLEDGE_CUTOFF_UPPER = "2026-03"     # latest plausible cutoff; widen if dual-stated
 MODEL_KNOWLEDGE_CUTOFF_SOURCE = (
-    "https://deepmind.google/models/model-cards/gemini-3-5-flash/"
+    "https://deepmind.google/models/model-cards/gemini-3-6-flash/"
 )
 MODEL_KNOWLEDGE_CUTOFF_SOURCE_TYPE = "official_model_card"
 MODEL_KNOWLEDGE_CUTOFF_RETRIEVED_UTC = "2026-07-30"
@@ -105,9 +111,14 @@ os.makedirs(RUN_DIR, exist_ok=True)
 #   - Explicit prohibition on undeclared imputation, so that Code-Documentation
 #     Fidelity failures are genuine drift rather than an artefact of the prompt
 #     never asking for the behaviour to be stated.
+#
+# SYSTEM PROMPT IS HELD AT v3.0 AND IS BYTE-IDENTICAL TO THE v3.0 ARM.
+# Theme conditioning is the single toggle relative to that arm, so the system
+# prompt version must NOT be bumped: its sha256 is unchanged and the metadata
+# must say so. Only the user prompt advances to v4.0.
 
-SYSTEM_PROMPT_VERSION = "v2.0"
-USER_PROMPT_VERSION = "v2.0"
+SYSTEM_PROMPT_VERSION = "v4.0"
+USER_PROMPT_VERSION = "v4.0"
 
 SYSTEM_INSTRUCTION = """
 You are a quantitative researcher and algorithmic trading system developer specialising in US Equities. Your objective is to design one candidate quantitative trading alpha utilizing exclusively daily OHLCV market data.
@@ -135,8 +146,6 @@ Provide a structured summary containing:
 
 # Section 2: Mathematical Formulation
 Provide the exact, step-by-step mathematical formulation of the alpha signal. You must use LaTeX for all mathematical notation. Clearly define all variables. Refer to parameters by the names declared in Section 1.
-Avoid introducing unnecessary mathematical complexity solely to increase perceived novelty.
-Prefer simple, interpretable constructions when they adequately represent the proposed market mechanism.
 State explicitly any handling of undefined values that is part of the formulation: minimum observation counts for rolling windows, treatment of division by zero, and treatment of missing observations. If the formulation performs no such handling, say so.
 
 # Section 3: Causal Rationale
@@ -167,10 +176,76 @@ Output only a single executable Python code block.
 No explanatory text should appear within Section 5. The final expression must evaluate to a single pandas.Series aligned to df. Do not include backtesting code, portfolio construction, transaction cost modelling, plotting, or performance evaluation.
 """
 
-USER_PROMPT = (
-    "Generate one candidate quantitative trading alpha. "
-    "Follow all requirements specified in the system prompt."
-)
+# ---------------------------------------------------------------------------
+# 4b. THEME CONDITIONING (user prompt v4.0)
+# ---------------------------------------------------------------------------
+# PRE-REGISTERED. Frozen before generation; no theme added, removed, or
+# reworded after any output was seen. THEME_SPEC_SHA256 pins this, so the
+# claim is checkable rather than merely asserted.
+#
+# The eight themes are the price- and volume-derived anomalies of the standard
+# cross-sectional asset pricing literature that are computable from OHLCV
+# alone. Fundamentals-based factors (value, size, quality, investment,
+# profitability) are absent because the data tier excludes them, not by choice.
+#
+# The prompt's ENTIRE theme contribution is the theme title. No description, no
+# construction guidance, no operations named. The construction remains the
+# model's to choose — otherwise the corpus measures the researcher's design
+# choices and the Stage 3 battery tests the wrong author.
+#
+# Citations are recorded here for the write-up and are NOT sent to the model:
+#   momentum                      Jegadeesh & Titman (1993)
+#   short-term reversal           Jegadeesh (1990); Lehmann (1990)
+#   long-term reversal            De Bondt & Thaler (1985)
+#   volatility                    Ang, Hodrick, Xing & Zhang (2006)
+#   liquidity                     Amihud (2002); Datar, Naik & Radcliffe (1998)
+#   trading volume                Gervais, Kaniel & Mingelgrin (2001)
+#   nearness to the 52-week high  George & Hwang (2004)
+#   beta                          Frazzini & Pedersen (2014)
+#
+# DISCLOSURE (governs Stage 4): naming canonical anomalies points generation at
+# the Benchmark Leakage comparison corpus, and bare canonical labels are
+# stronger recall triggers than descriptive phrasing would be. The themed arm's
+# leakage rate is therefore CONDITIONAL and is not an unbiased estimate of
+# unsteered model behaviour. The v2.0/v3.0 unconditioned arms supply that
+# baseline. Report both, labelled.
+
+THEME_SPEC = [
+    "momentum",
+    "short-term reversal",
+    "long-term reversal",
+    "volatility",
+    "liquidity",
+    "trading volume",
+    "nearness to the 52-week high",
+    "beta",
+]
+N_PER_THEME = 3
+
+
+def theme_slug(theme: str) -> str:
+    """Machine-readable id for metadata grouping and cell counting."""
+    return theme.lower().replace("-", "_").replace(" ", "_")
+
+
+def build_user_prompt(theme: str) -> str:
+    return (
+        "Generate one candidate quantitative trading alpha. "
+        "Follow all requirements specified in the system prompt.\n\n"
+        f"The alpha's economic mechanism must centre on {theme}. "
+        "Within that constraint, the specific construction is entirely yours "
+        "to choose."
+    )
+
+
+# Explicit call plan: inspectable before any API spend, and the auditable
+# denominator for the attempts == artifacts invariant.
+CALL_PLAN = [
+    (theme_slug(theme), theme, build_user_prompt(theme))
+    for theme in THEME_SPEC
+    for _ in range(N_PER_THEME)
+]
+N_ALPHAS = len(CALL_PLAN)   # 8 themes x 3 samples = 24
 
 
 def sha256(text: str) -> str:
@@ -179,7 +254,11 @@ def sha256(text: str) -> str:
 
 
 SYSTEM_PROMPT_SHA256 = sha256(SYSTEM_INSTRUCTION)
-USER_PROMPT_SHA256 = sha256(USER_PROMPT)
+USER_PROMPT_SHA256_BY_THEME = {
+    theme_slug(theme): sha256(build_user_prompt(theme))
+    for theme in THEME_SPEC
+}
+THEME_SPEC_SHA256 = sha256(json.dumps(THEME_SPEC, sort_keys=True))
 
 # ---------------------------------------------------------------------------
 # 5. STATIC VALIDATION (FLAGS ONLY — NEVER FILTERS)
@@ -345,13 +424,14 @@ rng = random.Random(MASTER_SEED)
 run_records = []
 
 print(f"Run {run_id}: generating {N_ALPHAS} alphas from {MODEL_NAME}")
+print(f"Plan: {len(THEME_SPEC)} themes x {N_PER_THEME} samples")
 print(f"Recorded knowledge cutoff: {MODEL_KNOWLEDGE_CUTOFF} "
       f"({MODEL_KNOWLEDGE_CUTOFF_SOURCE_TYPE})")
 
-for i in range(N_ALPHAS):
+for i, (theme_id, theme_title, user_prompt) in enumerate(CALL_PLAN):
     alpha_id = f"alpha_{uuid.uuid4().hex[:8]}"
     call_seed = rng.randint(0, 2**31 - 1)
-    print(f"[{i+1}/{N_ALPHAS}] {alpha_id} (seed={call_seed})")
+    print(f"[{i+1}/{N_ALPHAS}] {alpha_id} theme={theme_id} (seed={call_seed})")
 
     metadata = {
         # --- Section 5 mandatory block ---
@@ -367,7 +447,8 @@ for i in range(N_ALPHAS):
         "system_prompt_version": SYSTEM_PROMPT_VERSION,
         "user_prompt_version": USER_PROMPT_VERSION,
         "parameters": None,  # populated from validation below
-        "theme": "Unconstrained Generation",
+        "theme": theme_id,
+        "theme_title": theme_title,
         "timestamp_utc": None,
 
         # --- Section 3b supporting provenance ---
@@ -378,7 +459,8 @@ for i in range(N_ALPHAS):
         "thinking_level_applied": None,
         "master_seed": MASTER_SEED,
         "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
-        "user_prompt_sha256": USER_PROMPT_SHA256,
+        "user_prompt_sha256": USER_PROMPT_SHA256_BY_THEME[theme_id],
+        "theme_spec_sha256": THEME_SPEC_SHA256,
         "model_knowledge_cutoff_lower": MODEL_KNOWLEDGE_CUTOFF_LOWER,
         "model_knowledge_cutoff_upper": MODEL_KNOWLEDGE_CUTOFF_UPPER,
         "model_knowledge_cutoff_source": MODEL_KNOWLEDGE_CUTOFF_SOURCE,
@@ -395,7 +477,7 @@ for i in range(N_ALPHAS):
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=USER_PROMPT,
+            contents=user_prompt,
             config=config,
         )
         raw_text = response.text
@@ -477,6 +559,7 @@ for i in range(N_ALPHAS):
 
     run_records.append({
         "alpha_id": alpha_id,
+        "theme": theme_id,
         "status": metadata["generation_status"],
         "seed": call_seed,
         "response_sha256": payload["response_sha256"],
@@ -496,6 +579,11 @@ for i in range(N_ALPHAS):
 hashes = [r["response_sha256"] for r in run_records if r["response_sha256"]]
 duplicate_hashes = len(hashes) - len(set(hashes))
 
+theme_counts = {
+    theme_slug(t): sum(r["theme"] == theme_slug(t) for r in run_records)
+    for t in THEME_SPEC
+}
+
 manifest = {
     "run_id": run_id,
     "started_utc": run_started,
@@ -510,7 +598,12 @@ manifest = {
     "system_prompt_version": SYSTEM_PROMPT_VERSION,
     "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
     "user_prompt_version": USER_PROMPT_VERSION,
-    "user_prompt_sha256": USER_PROMPT_SHA256,
+    "user_prompt_sha256_by_theme": USER_PROMPT_SHA256_BY_THEME,
+    "theme_spec": THEME_SPEC,
+    "theme_spec_sha256": THEME_SPEC_SHA256,
+    "n_themes": len(THEME_SPEC),
+    "n_per_theme": N_PER_THEME,
+    "theme_counts": theme_counts,
     "n_attempted": N_ALPHAS,
     "n_artifacts_written": len(run_records),
     "n_success": sum(r["status"] == "success" for r in run_records),
@@ -531,16 +624,29 @@ prompt_path = os.path.join(RUN_DIR, f"{run_id}_prompts.txt")
 with open(prompt_path, "w", encoding="utf-8") as f:
     f.write(f"SYSTEM ({SYSTEM_PROMPT_VERSION}, sha256={SYSTEM_PROMPT_SHA256})\n")
     f.write(SYSTEM_INSTRUCTION)
-    f.write(f"\n\nUSER ({USER_PROMPT_VERSION}, sha256={USER_PROMPT_SHA256})\n")
-    f.write(USER_PROMPT)
+    f.write(f"\n\nTHEME SPEC (sha256={THEME_SPEC_SHA256}, "
+            f"{len(THEME_SPEC)} themes x {N_PER_THEME} samples)\n")
+    for theme in THEME_SPEC:
+        slug = theme_slug(theme)
+        f.write(f"\n--- USER ({USER_PROMPT_VERSION}, theme={slug}, "
+                f"sha256={USER_PROMPT_SHA256_BY_THEME[slug]})\n")
+        f.write(build_user_prompt(theme) + "\n")
 
 print(f"\nAttempted {N_ALPHAS}, wrote {len(run_records)} artifacts.")
 print(f"success={manifest['n_success']} "
       f"api_error={manifest['n_api_error']} "
       f"quarantined={manifest['n_quarantined']} "
       f"exact_duplicates={duplicate_hashes}")
+print(f"theme_counts={theme_counts}")
 print(f"Manifest: {manifest_path}")
 
 assert len(run_records) == N_ALPHAS, (
     "Artifact count != attempt count. Undisclosed attrition — do not use this run."
+)
+
+# Total count alone is not sufficient: a dropped call topped up from a second
+# run keeps the total right while silently unbalancing the design. Check cells.
+assert all(theme_counts[theme_slug(t)] == N_PER_THEME for t in THEME_SPEC), (
+    f"Theme cells unbalanced: {theme_counts}. "
+    "Do not top up — rerun the whole plan."
 )
