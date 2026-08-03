@@ -8,7 +8,7 @@ import scipy.stats as stats
 
 
 # VARIABLES TO SET BEFORE RUNNING
-TARGET_MODEL = "gemini-3.6-flash-v2"  # Change to "gemini-3.6-flash" when needed
+TARGET_MODEL = "gemini-3.6-flash-v3"  # Change to "gemini-3.6-flash" when needed
 
 # =========================================================
 # 0. ANCHOR ALL PATHS TO THEIR RESPECTIVE FOLDERS
