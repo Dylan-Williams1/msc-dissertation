@@ -14,7 +14,7 @@ OHLCV panel, then runs three checks per alpha:
 Check 3 is arm-agnostic: point it at the LLM alpha folder and it audits those
 too. It is the mechanical half of the Structural Validity gate.
 
-Run:  python smoke_test.py <alpha_dir> [out_csv]
+Run:  python gate0_structural_audit.py <alpha_dir> [out_csv]
 """
 import glob
 import json
@@ -24,6 +24,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 
 
 def synthetic_panel(n_sym=250, n_days=800, seed=7):
@@ -84,7 +85,7 @@ def corrupt_future(df, cut_date, seed=11):
     return out
 
 
-def main(alpha_dir, out_csv="smoke_test_results.csv"):
+def main(alpha_dir, out_csv="gate0_structural_audit_results.csv"):
     df = synthetic_panel()
     dates = df.index.get_level_values("date").unique().sort_values()
     cut = dates[int(len(dates) * 0.75)]
@@ -145,4 +146,4 @@ def main(alpha_dir, out_csv="smoke_test_results.csv"):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "smoke_test_results.csv")
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "gate0_structural_audit_results.csv")
