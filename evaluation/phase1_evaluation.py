@@ -8,7 +8,7 @@ import scipy.stats as stats
 
 
 # VARIABLES TO SET BEFORE RUNNING
-TARGET_MODEL = "gemini-3.6-flash-v3"  # Change to "gemini-3.6-flash" when needed
+TARGET_MODEL = "gemini-3.6-flash-v4"
 
 # Execution convention used for the RANK IC calculation.
 #   "open_t1"    signal at close t -> execute open t+1 -> exit open t+2   (locked default)
@@ -191,6 +191,7 @@ else:
 output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "alphas", "raw", TARGET_MODEL)
 results = []
 ic_series_by_alpha = {}   # keep the daily series - this is Instrument 1's input
+alpha_id_to_path = {}     # alpha_id -> source JSON path, used to export survivors below
 
 # Look for all .json files directly inside that specific folder
 search_pattern = os.path.join(output_dir, "*.json")
@@ -226,6 +227,7 @@ for file_path in json_files:
 
     meta = alpha_data["metadata"]
     alpha_id = meta["alpha_id"]
+    alpha_id_to_path[alpha_id] = file_path
     num_trials = trials_per_model[meta.get("model", "UNKNOWN_MODEL")]
     print(f"Evaluating [{alpha_id}] (model={meta.get('model')}, N={num_trials})...")
 
@@ -366,6 +368,30 @@ if ic_series_by_alpha:
     ic_panel.to_csv(ic_output_path)
 else:
     ic_output_path = None
+
+# --- Export surviving alphas ---------------------------------------------
+# Copies the original JSON (metadata + raw_response) for every alpha that
+# passed DSR screening into alphas/survived/<TARGET_MODEL>/, so Phase 2 can
+# read straight from a pre-filtered folder instead of re-deriving the status
+# column each time.
+import shutil
+
+SURVIVORS_ROOT = r"C:\University\Master's\Diss\Dissertation\alphas\survived"
+survivors_dir = os.path.join(SURVIVORS_ROOT, TARGET_MODEL)
+os.makedirs(survivors_dir, exist_ok=True)
+
+survivor_ids = df_results.loc[df_results["status"] == "SURVIVED_PHASE_1", "alpha_id"]
+n_copied = 0
+for aid in survivor_ids:
+    src = alpha_id_to_path.get(aid)
+    if src is None:
+        print(f"   -> WARNING: no source path recorded for survivor {aid}, skipping copy.")
+        continue
+    dst = os.path.join(survivors_dir, os.path.basename(src))
+    shutil.copy2(src, dst)
+    n_copied += 1
+
+print(f"\nSurvivors copied     : {n_copied} / {len(survivor_ids)} to {survivors_dir}")
 
 print("\n--- BATCH EVALUATION COMPLETE ---")
 print(f"Results successfully saved to {csv_output_path}")
