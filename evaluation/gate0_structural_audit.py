@@ -114,7 +114,7 @@ def main(alpha_dir, out_csv="gate0_structural_audit_results.csv"):
                 fv = sig[finite].index.get_level_values("date").min()
                 row["first_valid_date"] = str(fv.date())
                 wide = sig.unstack("symbol")
-                net = wide.sum(axis=1, min_count=1).abs()
+                net = wide.sum(axis=1, min_count=1).abs() / wide.abs().sum(axis=1, min_count=1)
                 row["max_net_exposure"] = round(float(net.max()), 8)
 
             sig_cut = fn(df_cut)
@@ -138,7 +138,7 @@ def main(alpha_dir, out_csv="gate0_structural_audit_results.csv"):
     print(f"executed cleanly      : {int(res['executes'].sum())}")
     print(f"look-ahead violations : {int((res['lookahead_violation'] == 'YES').sum())}")
     print(f"median coverage       : {res['coverage'].median():.3f}")
-    print(f"max |net exposure|    : {res['max_net_exposure'].max():.2e}")
+    print(f"max |net exposure| (ratio)    : {res['max_net_exposure'].max():.2e}")
     if (~res["executes"]).any():
         print("\nFAILURES:")
         print(res.loc[~res["executes"], ["alpha_id", "error"]].to_string(index=False))
