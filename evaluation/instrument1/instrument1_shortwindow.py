@@ -25,6 +25,23 @@ REMOVED after review, and why:
     ones receiving FWER protection - which makes breaks HARDER to find for
     exactly the alphas best placed to certify. No upside, real bias.
 
+BUG FIXES (both are SIZE corrections, not relaxations of the standard):
+  A. block_bootstrap_cv returned the conf quantile of |t*| - a TWO-SIDED
+     critical value - while tost() compares it against one-sided statistics
+     on both tails. Every one-sided test was therefore running at alpha=0.025
+     rather than 0.05. Now returns the signed (1-conf, conf) quantiles, which
+     reduce to (-1.645, +1.645) as dependence vanishes. Recovers ~14% of the
+     critical value, ~26% of the certifying margin, at this window length.
+  B. The MDE gate used sigma_up / sqrt(T_eff(post)) while the test
+     studentises by sqrt(nw_var_mean(pre) + nw_var_mean(post)). The tested
+     statistic is a DIFFERENCE OF MEANS, so the correct T is the harmonic
+     combination T_paired = (1/T_pre + 1/T_post)^-1 <= T_post. The old form
+     understated the SE and therefore the MDE, letting the gate certify power
+     the test could not deliver. Fix moves the gate the CONSERVATIVE way
+     (+6% MDE here) and makes T_paired the frontier's T everywhere. It also
+     makes explicit that lengthening the IS window is nearly worthless once
+     T_pre >> T_post: the short arm binds.
+
 NOTE ON FRAMING: k, sigma and N_eff sit in the same place as r in
 IC_IS >= k*sigma/(r*sqrt(T_eff*N_eff)), so "does not touch r" is not a
 defence. The test applied here is whether a change improves the ESTIMATOR
@@ -77,7 +94,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
-ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "gemini-3.5-flash")
+ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "gemini-3.6-flash")
 CONTROL_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "kakushadze-101-v1")
 DATA_PATH = os.path.join(ROOT_DIR, "data", "daily_ohlcv.parquet")
 OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
@@ -90,7 +107,9 @@ CACHE_DIR = os.path.join(SCRIPT_DIR, ".ic_cache")
 IC_SOURCE = "phase1"
 PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
 
-CUTOFF_DATE = "2025-01-01"
+# gemini-3.6-flash. Vendor cutoff is approximate; section 2 requires an
+# INTERVAL, and this is the point date the interval is centred on.
+CUTOFF_DATE = "2026-01-01"
 CUTOFF_UNCERTAINTY_DAYS = 30      # placebo buffer AND Proximity tolerance
 
 # Forward return convention. Signal formed at close of t, rebalanced at the
@@ -344,6 +363,48 @@ def effective_T(x):
     return float(np.clip(T * v_iid / v_hac, 1.0, T))
 
 
+def paired_T_eff(series, cutoff, L):
+    """
+    Effective sample size OF THE TESTED STATISTIC, which is a DIFFERENCE OF
+    TWO MEANS, not of the OOS window alone.
+
+    BUG FIX - the MDE gate used sigma_up / sqrt(T_eff(post)) while tost()
+    studentises by sqrt(nw_var_mean(pre) + nw_var_mean(post)). Those are
+    different denominators, so the gate was not measuring the power of the
+    test it gates. The statistic is mean(post) - mean(pre), with
+
+        Var = sigma^2 * (1/T_pre + 1/T_post),
+
+    so the T belonging under the square root in both the MDE and the frontier
+    is the HARMONIC combination
+
+        T_paired = (1/T_pre + 1/T_post)^-1  <=  T_post.
+
+    Using T_post alone UNDERSTATES the standard error and therefore
+    understates the MDE, so the gate could certify power the test cannot
+    deliver. The fix moves the gate in the conservative direction, which is
+    the direction section 1 requires.
+
+    Two things this makes visible and the old form hid:
+      - T_paired < T_post always, so the gate is strictly harder to pass.
+      - T_paired -> T_post as T_pre grows, so lengthening the IN-SAMPLE
+        window buys essentially nothing once T_pre >> T_post. The binding
+        constraint is the short arm, which is exactly the recent-model case.
+
+    Returns (T_pre_eff, T_post_eff, T_paired).
+    """
+    v = series.dropna()
+    pre = v.loc[v.index < cutoff]
+    post = v.loc[v.index >= cutoff].iloc[:L]
+    if len(pre) < MIN_SIDE_OBS or len(post) < MIN_SIDE_OBS:
+        return np.nan, np.nan, np.nan
+    t_pre = effective_T(pre)
+    t_post = effective_T(post)
+    if not (np.isfinite(t_pre) and np.isfinite(t_post)) or min(t_pre, t_post) <= 0:
+        return t_pre, t_post, np.nan
+    return t_pre, t_post, float(1.0 / (1.0 / t_pre + 1.0 / t_post))
+
+
 def window_slice(series, pos, L, mode=WINDOW_MODE):
     v = series
     if mode == "symmetric":
@@ -428,18 +489,36 @@ def sigma_is_upper(series, cutoff, conf=0.95):
 
 def block_bootstrap_cv(pre, post, conf=0.95, n_boot=BOOT_BLOCKS, seed=RNG_SEED):
     """
-    Critical value for the studentised shift from a MOVING-BLOCK BOOTSTRAP.
+    Critical values for the studentised shift from a MOVING-BLOCK BOOTSTRAP.
 
     Below T_eff ~ 100 the standard normal is unreliable for HAC inference
     (spec line 66). Each segment is centred on its own mean, imposing the null
     of zero shift, then resampled in blocks of length l = ceil(T^(1/3)) so the
-    within-block dependence is preserved. The critical value is the conf
-    quantile of |t*|. Reduces to ~1.645 as dependence vanishes.
+    within-block dependence is preserved.
+
+    Returns (cv_lo, cv_hi): the (1-conf) and conf quantiles of the SIGNED
+    bootstrap statistic. As dependence vanishes these approach -1.645 and
+    +1.645, reproducing the normal one-sided values exactly.
+
+    BUG FIX - was returning the conf quantile of |t*|, i.e. a TWO-SIDED
+    critical value, while tost() compares it against one-sided statistics on
+    both tails. For a roughly symmetric null, quantile(|t*|, 0.95) equals
+    quantile(t*, 0.975), so every one-sided test was being run at alpha=0.025
+    rather than 0.05. At the effective sample sizes here that inflates the
+    critical value by roughly 15-25%, and since the test is
+    (diff + delta)/se > cv, the inflation is a pure power loss: alphas were
+    failing non-inferiority on a threshold stricter than the one the
+    methodology specifies. Returning the signed quantiles fixes the size of
+    the test rather than relaxing it.
+
+    The tails are reported separately rather than assumed symmetric: the
+    differential's block bootstrap need not be, and asymmetry is itself worth
+    seeing in the output.
     """
     a, b = np.asarray(pre, float), np.asarray(post, float)
     a, b = a[np.isfinite(a)], b[np.isfinite(b)]
     if a.size < MIN_SIDE_OBS or b.size < MIN_SIDE_OBS:
-        return np.nan
+        return np.nan, np.nan
     a, b = a - a.mean(), b - b.mean()
     rng = np.random.default_rng(seed)
 
@@ -454,9 +533,13 @@ def block_bootstrap_cv(pre, post, conf=0.95, n_boot=BOOT_BLOCKS, seed=RNG_SEED):
     for i in range(n_boot):
         aa, bb = blocks(a), blocks(b)
         v = _lrv_np(aa) / aa.size + _lrv_np(bb) / bb.size
-        ts[i] = abs(bb.mean() - aa.mean()) / np.sqrt(v) if v > 0 else np.nan
+        # SIGNED, not absolute. See docstring.
+        ts[i] = (bb.mean() - aa.mean()) / np.sqrt(v) if v > 0 else np.nan
     ts = ts[np.isfinite(ts)]
-    return float(np.quantile(ts, conf)) if ts.size else np.nan
+    if not ts.size:
+        return np.nan, np.nan
+    return (float(np.quantile(ts, 1.0 - conf)),
+            float(np.quantile(ts, conf)))
 
 
 def tost(series, cutoff, L, delta):
@@ -467,26 +550,35 @@ def tost(series, cutoff, L, delta):
     v = series.dropna()
     pre, post = v.loc[v.index < cutoff], v.loc[v.index >= cutoff].iloc[:L]
     if len(pre) < MIN_SIDE_OBS or len(post) < MIN_SIDE_OBS or not np.isfinite(delta):
-        return dict(diff=np.nan, se=np.nan, equivalent=False, reason="insufficient data")
+        return dict(diff=np.nan, se=np.nan, cv=np.nan, cv_lo=np.nan,
+                    cv_source="none", T_paired=np.nan, equivalent=False,
+                    mode=TEST_MODE, reason="insufficient data")
     vp, vq = nw_var_mean(pre), nw_var_mean(post)
     se = np.sqrt(vp + vq)
     if not np.isfinite(se) or se <= 0:
-        return dict(diff=np.nan, se=np.nan, equivalent=False, reason="degenerate SE")
+        return dict(diff=np.nan, se=np.nan, cv=np.nan, cv_lo=np.nan,
+                    cv_source="none", T_paired=np.nan, equivalent=False,
+                    mode=TEST_MODE, reason="degenerate SE")
     diff = float(post.mean() - pre.mean())
-    T_eff_post = effective_T(post)
-    cv = 1.6448536269514722                     # z(0.95), one-sided
+    # The finite-sample distortion is governed by the same T that governs the
+    # SE, i.e. the paired one, not the OOS window on its own.
+    _, _, T_paired = paired_T_eff(series, cutoff, L)
+    z95 = 1.6448536269514722
+    cv_lo, cv_hi = -z95, z95                    # one-sided normal, both tails
     cv_source = "normal"
-    if T_eff_post < FIXED_B_THRESHOLD:
-        cv_b = block_bootstrap_cv(pre.to_numpy(float), post.to_numpy(float))
-        if np.isfinite(cv_b):
-            cv, cv_source = cv_b, "block-bootstrap"
-    lower_ok = (diff - (-delta)) / se > cv        # not degraded by more than delta
-    upper_ok = (diff - delta) / se < -cv          # not improved by more than delta
+    if np.isfinite(T_paired) and T_paired < FIXED_B_THRESHOLD:
+        b_lo, b_hi = block_bootstrap_cv(pre.to_numpy(float), post.to_numpy(float))
+        if np.isfinite(b_lo) and np.isfinite(b_hi):
+            cv_lo, cv_hi, cv_source = b_lo, b_hi, "block-bootstrap"
+    # SIGNED one-sided comparisons. Each tail uses its own critical value.
+    lower_ok = (diff - (-delta)) / se > cv_hi     # not degraded by more than delta
+    upper_ok = (diff - delta) / se < cv_lo        # not improved by more than delta
     if TEST_MODE == "noninferiority":
         ok = bool(lower_ok)                       # upper tail is not of interest
     else:
         ok = bool(lower_ok and upper_ok)
-    return dict(diff=diff, se=float(se), cv=float(cv), cv_source=cv_source,
+    return dict(diff=diff, se=float(se), cv=float(cv_hi), cv_lo=float(cv_lo),
+                cv_source=cv_source, T_paired=T_paired,
                 equivalent=ok, mode=TEST_MODE,
                 reason="" if ok else ("degraded beyond delta"
                                       if TEST_MODE == "noninferiority"
@@ -1048,7 +1140,10 @@ def main():
         is_ic = float(trt_ic[c].loc[trt_ic.index < cutoff].mean())
         delta = r * abs(is_ic)
         oos = sd.loc[sd.index >= cutoff].iloc[:L]
-        T_eff = effective_T(oos)
+        # PAIRED T, not OOS-only T: the gate must use the same denominator as
+        # the test it gates. sigma still comes from IS ONLY, so the gate still
+        # cannot see the data it is gating.
+        T_eff_pre, T_eff_oos, T_eff = paired_T_eff(sd, cutoff, L)
         sig_hat, sig_up = sigma_is_upper(sd, cutoff)   # IS ONLY, upper bound
         mde = K_MDE * sig_up / np.sqrt(max(T_eff, 1e-9))
         power_ok = bool(np.isfinite(mde) and np.isfinite(delta) and mde <= delta)
@@ -1057,9 +1152,11 @@ def main():
             alpha_id=c, is_rank_ic=is_ic, beta=betas.get(c, np.nan),
             pair_r2=float(r2s.get(c, np.nan)), paired=bool(paired.get(c, False)),
             sigma_is=sig_hat, sigma_is_upper=sig_up,
-            T_nominal=int(oos.notna().sum()), T_eff=T_eff,
+            T_nominal=int(oos.notna().sum()),
+            T_eff_is=T_eff_pre, T_eff_oos=T_eff_oos, T_eff=T_eff,
             delta=delta, mde=mde, power_ok=power_ok,
-            tost_diff=t["diff"], tost_se=t["se"], tost_cv=t["cv"],
+            tost_diff=t["diff"], tost_se=t["se"],
+            tost_cv=t["cv"], tost_cv_lo=t["cv_lo"],
             cv_source=t["cv_source"], equivalent=t["equivalent"],
             magnitude=res.loc[c, "magnitude"], p_magnitude=res.loc[c, "p_magnitude"],
             p_magnitude_rw=res.loc[c, "p_magnitude_rw"],
@@ -1085,7 +1182,7 @@ def main():
         if abs(is_ic) < MIN_IS_IC_FOR_R:
             continue
         delta = r * abs(is_ic)
-        T_eff = effective_T(sd.loc[sd.index >= cutoff].iloc[:L])
+        _, _, T_eff = paired_T_eff(sd, cutoff, L)   # paired, as treatment arm
         _, sig_up = sigma_is_upper(sd, cutoff)
         mde = K_MDE * sig_up / np.sqrt(max(T_eff, 1e-9))
         pok = bool(np.isfinite(mde) and np.isfinite(delta) and mde <= delta)
@@ -1104,14 +1201,15 @@ def main():
     pooled = diff.mean(axis=1)
     p_is = float(trt_ic.loc[trt_ic.index < cutoff].mean().mean())
     p_delta = r * abs(p_is)
-    p_Teff = effective_T(pooled.loc[pooled.index >= cutoff].iloc[:L])
+    _, p_Teff_oos, p_Teff = paired_T_eff(pooled, cutoff, L)
     _, p_sig_up = sigma_is_upper(pooled, cutoff)
     # NO N_eff term here: sigma of the POOLED series already contains the
     # pooling gain. Multiplying it in again double-counts.
     p_mde = K_MDE * p_sig_up / np.sqrt(max(p_Teff, 1e-9))
     p_tost = tost(pooled, cutoff, L, p_delta)
     pooled_ok = np.isfinite(p_mde) and p_mde <= p_delta
-    print(f"   T_eff {p_Teff:.0f} | delta {p_delta:.5f} | MDE {p_mde:.5f}"
+    print(f"   T_eff paired {p_Teff:.0f} (OOS arm {p_Teff_oos:.0f})"
+          f" | delta {p_delta:.5f} | MDE {p_mde:.5f}"
           f" -> {'PASSES' if pooled_ok else 'FAILS'} the gate")
     print(f"   equivalence: {p_tost['equivalent']}")
 
@@ -1135,7 +1233,7 @@ def main():
     print(f"   control CERTIFICATION rate     : {ctrl_cert:.3f}"
           "   <- empirical FPR of the WHOLE pipeline")
     print(f"   power-insufficient: {int((~out['power_ok']).sum())} of {len(out)}")
-    _te = effective_T(pooled.iloc[-L:])
+    _, _, _te = paired_T_eff(pooled, cutoff, L)
     print(f"\n   frontier at L={L} (k={K_MDE}, {TEST_MODE}): IS Rank IC must exceed "
           f"{frontier_ic(sig_d, r, _te):.4f} per alpha, "
           f"or {frontier_ic(sig_d, r, _te, N_eff):.4f} pooled")
