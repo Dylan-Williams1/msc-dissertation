@@ -508,38 +508,61 @@ def restrict_to_corpus(ic, alpha_dir, label, allow_all=False):
     return ic[keep], keep
 
 
-def corpus_feasibility(ic_full, keep, cutoff, L, r, k=K_MDE):
+def corpus_feasibility(ic_full, diff_full, ic_survivors, diff_survivors, cutoff, L, r, k=K_MDE):
     """
-    IS-ONLY comparison of the survivor corpus against the full Phase 1 corpus.
+    IS-ONLY comparison of the survivor corpus against the full Phase 1 corpus,
+    ON THE DIFFERENTIAL - the quantity the primary pipeline actually pools.
+
+    BUG FIX: this previously pooled the RAW IC panel, giving a sigma_pooled
+    with no relationship to the one [6/6] reports (raw sigma is roughly the
+    UN-de-factored series; the real pipeline pools the CONTROL-RESIDUALISED
+    differential, which can be several times smaller). The two blocks could
+    therefore print CONTRADICTORY conclusions about the same screening
+    decision. Both callers now pass differential panels built with the
+    IDENTICAL basis, so the comparison and the primary result agree by
+    construction.
 
     Screening moves two things in OPPOSITE directions and the net sign is not
     obvious a priori:
         delta = r * mean|IS IC|      rises  (survivors have stronger signal)
         MDE   = k * sigma / sqrt(T)  rises  (fewer alphas -> smaller N_eff
                                              -> larger sigma_pooled)
-    So a tighter screen helps only if it buys more in signal than it costs in
-    pooling. This prints the margin ratio delta/MDE for both corpora so the
-    section 8 DSR-threshold decision is settled with evidence.
+    This prints the margin ratio delta/MDE for both corpora so the section 8
+    DSR-threshold decision is settled with evidence.
 
-    Everything here is computed on IN-SAMPLE dates and the OOS window length
-    only. No OOS outcome is touched, so running it does not spend any
-    inferential budget.
+    Sign orientation (if enabled) is applied per corpus using each corpus's
+    OWN IS means - the full 19-alpha corpus and the 6-survivor corpus are not
+    guaranteed to orient identically, since a DSR-reject's sign is close to a
+    coin flip and can differ from run to run. mean|IS IC| below is reported on
+    the DIFFERENTIAL's implied IS mean (beta-adjusted), matching what the
+    primary pipeline's delta is actually built from.
+
+    Everything is computed on IN-SAMPLE dates and the OOS window length only.
+    No OOS outcome is touched, so running it spends no inferential budget.
     """
-    is_m = ic_full.index < cutoff
+    is_m = diff_full.index < cutoff
     rows = []
-    for name, cols in (("full Phase 1", list(ic_full.columns)),
-                       ("survivors", keep)):
-        if not cols:
+    for name, ic_sub, diff_sub in (("full Phase 1", ic_full, diff_full),
+                                   ("survivors", ic_survivors, diff_survivors)):
+        if diff_sub is None or diff_sub.shape[1] == 0:
             continue
-        sub = ic_full[cols]
-        m = sub.loc[is_m].mean()
-        pooled = sub.mul(np.sign(m).replace(0, 1), axis=1).mean(axis=1)
+        # delta MUST use the same formula as the primary pipeline:
+        # p_is = mean over alphas of each alpha's SIGNED IS mean raw IC, then
+        # delta = r * |p_is|. A ridge differential's IS mean is ~0 BY
+        # CONSTRUCTION (that is what the fit minimises), so computing delta
+        # from the differential instead of the raw IC silently redefines it
+        # to a near-zero quantity that has nothing to do with the alpha's
+        # actual signal strength - this is what produced mean_abs_is_ic =
+        # 0.0000 before this fix. sigma/T_eff/MDE correctly still come from
+        # the DIFFERENTIAL, since that is what gets pooled and tested.
+        p_is_sub = float(ic_sub.loc[is_m].mean().mean())
+        pooled = diff_sub.mean(axis=1)     # already oriented by the caller
         _, _, T_p = paired_T_eff(pooled, cutoff, L)
         _, sg_up = sigma_is_upper(pooled, cutoff)
         mde = k * sg_up / np.sqrt(max(T_p, 1e-9)) if np.isfinite(T_p) else np.nan
-        d = r * float(m.abs().mean())
-        rows.append(dict(corpus=name, n=len(cols),
-                         mean_abs_is_ic=float(m.abs().mean()),
+        d = r * abs(p_is_sub)
+        rows.append(dict(corpus=name, n=diff_sub.shape[1],
+                         mean_is_ic=p_is_sub,
                          sigma_pooled=float(pooled.loc[is_m].std(ddof=1)),
                          T_eff=T_p, delta=d, mde=mde,
                          margin_ratio=d / mde if np.isfinite(mde) and mde > 0
@@ -1809,30 +1832,72 @@ def main():
               "post-sample; flag the horizon caveat in the write-up)")
 
     if keep_ids and trt_full.shape[1] > trt_ic.shape[1]:
-        feas = corpus_feasibility(trt_full.loc[common], keep_ids, cutoff, L, r)
         print("\n[3b/6] corpus feasibility - was the screen worth it? "
               "(IS-ONLY; no OOS outcome touched)")
-        for _, w in feas.iterrows():
-            print(f"   {w['corpus']:>13}  n={int(w['n']):3d}  "
-                  f"mean|IS IC| {w['mean_abs_is_ic']:.4f}  "
-                  f"sigma_pooled {w['sigma_pooled']:.4f}  "
-                  f"delta {w['delta']:.5f}  MDE {w['mde']:.5f}  "
-                  f"delta/MDE {w['margin_ratio']:.2f}")
-        if len(feas) == 2:
-            fr, sr = feas.iloc[0]["margin_ratio"], feas.iloc[1]["margin_ratio"]
-            if np.isfinite(fr) and np.isfinite(sr):
-                print(f"   -> screening changed the margin ratio "
-                      f"{fr:.2f} -> {sr:.2f} ({'BETTER' if sr > fr else 'WORSE'}). "
-                      "Screening buys signal but\n      costs N_eff; this is "
-                      "the evidence for the section 8 DSR-threshold decision.")
-        feas.to_csv(os.path.join(OUT_DIR, f"corpus_feasibility_{model}.csv"),
-                    index=False)
+        # Build the FULL-corpus differential with the IDENTICAL basis and
+        # orientation rule as the primary (survivor) run, so the two rows are
+        # actually comparable. Sign orientation uses the full corpus's OWN IS
+        # means - a DSR-reject's sign is close to a coin flip and need not
+        # agree with how it was oriented (if at all) inside the survivor set.
+        trt_full_c = trt_full.loc[common]
+        if ORIENT_TREATMENT:
+            signs_full, _ = orient_signs(trt_full_c, cutoff)
+            trt_full_c = trt_full_c.mul(signs_full, axis=1)
+        _res = build_differentials_ridge(trt_full_c, ctrl_ic.loc[common], cutoff)
+        diff_full = _res[0] if _res[0] is not None else None
+        if diff_full is None:
+            print("   ! could not build the full-corpus differential "
+                  "(ridge fit failed); skipping.")
+        else:
+            feas = corpus_feasibility(trt_full_c, diff_full, trt_ic, diff,
+                                      cutoff, L, r)
+            for _, w in feas.iterrows():
+                print(f"   {w['corpus']:>13}  n={int(w['n']):3d}  "
+                      f"mean IS IC {w['mean_is_ic']:+.4f}  "
+                      f"sigma_pooled {w['sigma_pooled']:.4f}  "
+                      f"delta {w['delta']:.5f}  MDE {w['mde']:.5f}  "
+                      f"delta/MDE {w['margin_ratio']:.2f}")
+            if len(feas) == 2:
+                fr, sr = feas.iloc[0]["margin_ratio"], feas.iloc[1]["margin_ratio"]
+                if np.isfinite(fr) and np.isfinite(sr):
+                    print(f"   -> screening changed the margin ratio "
+                          f"{fr:.2f} -> {sr:.2f} "
+                          f"({'BETTER' if sr > fr else 'WORSE'}). Screening "
+                          "buys signal but\n      costs N_eff; this is the "
+                          "evidence for the section 8 DSR-threshold decision.")
+            print("   NOTE: r used here is the ONE frozen value from [3/6] "
+                  "(the survivor control\n      estimate). It is not "
+                  "re-estimated per corpus, so this isolates the effect of\n"
+                  "      screening the TREATMENT arm only.")
+            feas.to_csv(os.path.join(OUT_DIR, f"corpus_feasibility_{model}.csv"),
+                        index=False)
 
     print("\n[4/6] Method A - break tests with length-matched placebos")
     res, pl_mag, pl_prox, n_indep = method_a(diff, cutoff, L, model)
     loo_res, _, _, _ = method_a(loo, cutoff, L, "control FPR")
     fpr = float((loo_res["p_magnitude"] < ALPHA_LEVEL).mean())
     print(f"   control false-positive rate at alpha={ALPHA_LEVEL}: {fpr:.3f}")
+
+    # TREATMENT ARM SUMMARY. Section 4's reconciliation table needs this to
+    # exist as a printed result, not just as columns inside the per-alpha CSV
+    # - without it the reader cannot tell "these alphas decay" apart from
+    # "these alphas decay AT THIS MODEL'S CUTOFF", and only the second is the
+    # mechanism this instrument is testing.
+    n_brk = int((res["p_magnitude_rw"] < ALPHA_LEVEL).sum())
+    n_ok = int(res["p_magnitude_rw"].notna().sum())
+    print(f"   [{model}] break-at-cutoff (Romano-Wolf, alpha={ALPHA_LEVEL}): "
+          f"{n_brk} of {n_ok} alphas")
+    if n_ok:
+        print(f"      median p_magnitude_rw {res['p_magnitude_rw'].median():.3f}"
+              f"  |  median |break_offset| {res['break_offset'].abs().median():.1f} days")
+    if n_brk > 0:
+        _brk_ids = res.index[res["p_magnitude_rw"] < ALPHA_LEVEL].tolist()
+        print(f"      broken: {', '.join(_brk_ids)}")
+        print("      A break at the cutoff, if paired with equivalence FAILING "
+              "in Method B, is\n      the reconciliation table's CONTAMINATION "
+              "cell - the strongest finding this\n      instrument can "
+              "produce. Check these alphas individually before writing up "
+              "the\n      pooled verdict alone.")
 
     print("\n[5/6] Method B - TOST, MDE gate, frontier")
     rho_bar, npairs = mean_pairwise_corr(diff)
@@ -1950,6 +2015,23 @@ def main():
     p_dstar = delta_star(p_tost["diff"], p_tost["se"], p_tost["cv"],
                          p_tost["cv_lo"])
     p_rstar = p_dstar / abs(p_is) if abs(p_is) > MIN_IS_IC_FOR_R else np.nan
+
+    # METHOD A ON THE POOLED SERIES. Previously the primary estimand had no
+    # break test at all: [6/6] ran Method B only, so section 4's
+    # reconciliation table - which decides "decayed" vs "contaminated" -
+    # could not be applied to the number actually being certified. Wrapped as
+    # a single-column panel so method_a's placebo/Romano-Wolf machinery runs
+    # unchanged (family size 1 degrades gracefully: the "stepdown" null is
+    # just this series' own placebo distribution).
+    p_res, _, _, p_nindep = method_a(pd.DataFrame({model: pooled}),
+                                     cutoff, L, f"{model} POOLED")
+    p_row = p_res.loc[model]
+    p_brk = bool(p_row["p_magnitude_rw"] < ALPHA_LEVEL) \
+        if np.isfinite(p_row["p_magnitude_rw"]) else None
+    print(f"   Method A (pooled): p_magnitude {p_row['p_magnitude']:.3f}  "
+          f"break_offset {p_row['break_offset']:+.0f}d  "
+          + (f"-> {'BREAK' if p_brk else 'no break'} at cutoff (alpha={ALPHA_LEVEL})"
+             if p_brk is not None else "-> break test uncomputable"))
     p_sig = float(pooled.loc[pooled.index < cutoff].std(ddof=1))
     print(f"   sigma_pooled {p_sig:.5f} (per-alpha {sig_d:.5f}; "
           f"variance-reduction factor {sig_d/max(p_sig,1e-12):.2f}x, "
@@ -1987,38 +2069,68 @@ def main():
               + ("   <- gate PASSES" if p_mde <= _d else ""))
     print(f"   delta* pooled {p_dstar:.5f}  ->  r* = {p_rstar:.3f}"
           f"   against control-calibrated r = {r:.3f}")
-    if np.isfinite(p_rstar):
-        if not pooled_ok:
-            # Section 1: low power counts AGAINST certification, and section 4
-            # makes MDE > delta a fail. delta* <= delta with the gate failed
-            # means the realised draw was favourable at a sample size that
-            # could not have detected the alternative - a lucky draw, not
-            # evidence. delta* is still reported; it just cannot certify.
-            print("   -> NOT CERTIFIED (power-insufficient): MDE > delta, so "
-                  "the gate binds\n      REGARDLESS of delta*. "
-                  + (f"delta* ({p_dstar:.5f}) is below delta ({p_delta:.5f}), "
-                     "but at\n      this T_eff the design could not have "
-                     "detected the alternative, so the\n      pass is "
-                     "uninformative rather than affirmative."
-                     if p_dstar <= p_delta else
-                     "delta* exceeds delta as well."))
-        elif p_rstar <= r:
-            print("   -> POOLED CERTIFIED: excess decay ruled out at the "
-                  "control-calibrated tolerance, with the MDE gate satisfied.")
-        else:
-            print(f"   -> NOT CERTIFIED, but BOUNDED: LLM-specific excess decay "
-                  f"ruled out\n      above {100*p_rstar:.0f}% of IS IC at "
-                  f"{100*(1-ALPHA_LEVEL):.0f}% confidence. The margin needed is "
-                  f"{p_rstar/max(r,1e-12):.1f}x\n      the control norm - report "
-                  "this as the resolution of the design, not as evidence\n      "
-                  "of contamination.")
-    # what would close the remaining gap, in the units the frontier uses
-    if np.isfinite(p_rstar) and p_rstar > r and np.isfinite(p_delta):
-        need = (p_mde / max(p_delta, 1e-12)) ** 2
-        print(f"   TO CLOSE THE GAP: need T_eff x{need:.1f} (= {need*p_Teff:.0f} "
-              f"days), or sigma_pooled x{1/np.sqrt(need):.2f},\n      or mean "
-              f"|IS IC| x{np.sqrt(need):.1f} (= {abs(p_is)*np.sqrt(need):.4f}). "
-              "Length is the sqrt lever; the other two are linear.")
+
+    # FULL RECONCILIATION, using the SAME verdict() function applied per
+    # alpha, so the primary estimand and the descriptive per-alpha rows are
+    # judged by identical rules rather than by two pieces of logic that can
+    # silently drift apart (which is what happened before this fix: the
+    # pooled block certified/failed on r* alone, with no break test and no
+    # use of the gate-then-equivalence ORDER that verdict() enforces).
+    pooled_verdict = verdict(p_row, p_tost["equivalent"], pooled_ok)
+    print(f"   -> POOLED VERDICT: {pooled_verdict}")
+    if pooled_verdict == "NOT CERTIFIED (power-insufficient)":
+        print("      MDE > delta: the gate binds regardless of delta* or the "
+              "break test.\n      A pass on either would be a lucky draw at "
+              "a sample size that could not have\n      detected the "
+              "alternative, not affirmative evidence.")
+    elif pooled_verdict == "NOT CERTIFIED (break test uncomputable)":
+        print("      Section 1: ambiguity counts AGAINST certification. The "
+              "break test could not\n      be computed on the pooled series "
+              "(insufficient placebo coverage), so the\n      "
+              "reconciliation table has no break-test cell to read and the "
+              "claim cannot be\n      certified on Method B alone.")
+    elif pooled_verdict == "NOT CERTIFIED (break at cutoff)":
+        print("      Method A found a break AT THE CUTOFF and Method B could "
+              "not establish\n      equivalence. This is the reconciliation "
+              "table's CONTAMINATION cell -\n      the strongest finding "
+              "this instrument produces. Cross-check against which\n      "
+              "individual alphas broke (printed at [4/6]).")
+    elif pooled_verdict == "NOT CERTIFIED (break dominates)":
+        print(f"      Method A found a break at the cutoff even though "
+              f"Method B's equivalence\n      test passed at delta = "
+              f"{p_delta:.5f}. Per the reconciliation table the break "
+              "evidence\n      dominates: delta was wider than the break, "
+              "not narrower than the decay.")
+    elif pooled_verdict == "NOT CERTIFIED (decay, non-specific)":
+        print(f"      No break at the cutoff, but equivalence still failed "
+              f"(r* {p_rstar:.3f} > r {r:.3f}\n      given the MDE gate "
+              "passed). Decay is present but not shown to be TIED to this\n"
+              "      model's cutoff specifically - report as decay, not as "
+              "parametric look-ahead bias.")
+    elif pooled_verdict == "CERTIFIED":
+        print("      No break at cutoff, equivalence established, gate "
+              "satisfied. All three\n      conditions in the reconciliation "
+              "table's CERTIFIED row are met.")
+
+    # "closing the gap" is only meaningful when the GATE is what's failing.
+    # If the gate passes and equivalence still fails, the point estimate of
+    # excess decay simply exceeds tolerance - more data narrows the
+    # confidence interval around that estimate but does not shrink it in
+    # expectation, so there is no lever to report.
+    if not pooled_ok and np.isfinite(p_delta) and p_delta > 0:
+        need = (p_mde / p_delta) ** 2
+        print(f"   TO CLOSE THE POWER GAP: need T_eff x{need:.1f} "
+              f"(= {need*p_Teff:.0f} days), or sigma_pooled x{1/np.sqrt(need):.2f},"
+              f"\n      or mean |IS IC| x{np.sqrt(need):.1f} "
+              f"(= {abs(p_is)*np.sqrt(need):.4f}). Length is the sqrt lever; "
+              "the other two are linear.")
+    elif pooled_ok and np.isfinite(p_rstar) and p_rstar > r:
+        print(f"   Gate is satisfied; the shortfall is in the POINT ESTIMATE, "
+              f"not power.\n      delta* ({p_dstar:.5f}) exceeds delta "
+              f"({p_delta:.5f}) by {p_dstar/max(p_delta,1e-12):.2f}x. More "
+              "OOS\n      data narrows the confidence interval but does not "
+              "shrink this ratio in\n      expectation - it is a measured "
+              "excess, not a resolution limit.")
 
     # ---- report ----
     out.to_csv(os.path.join(OUT_DIR, f"instrument1_{model}.csv"))
@@ -2033,17 +2145,14 @@ def main():
                         if PRIMARY_ESTIMAND == "pooled" else ""))
     print("=" * 62)
     if PRIMARY_ESTIMAND == "pooled":
-        # gate first, then the test - same order as verdict() per alpha
-        if not pooled_ok:
-            _pv = "NOT CERTIFIED (power-insufficient)"
-        elif np.isfinite(p_rstar) and p_rstar <= r and p_tost["equivalent"]:
-            _pv = "CERTIFIED"
-        else:
-            _pv = "NOT CERTIFIED (decay beyond delta)"
+        # pooled_verdict computed once, at [6/6], via the SAME verdict()
+        # function used per-alpha - no separate logic to drift out of sync.
         print(f"   POOLED ({model}, n={diff.shape[1]}, N_eff={N_eff:.1f}, "
-              f"T_eff={p_Teff:.0f}): {_pv}")
+              f"T_eff={p_Teff:.0f}): {pooled_verdict}")
         print(f"      delta {p_delta:.5f} | MDE {p_mde:.5f} | "
-              f"delta* {p_dstar:.5f} | r* {p_rstar:.3f} vs r {r:.3f}")
+              f"delta* {p_dstar:.5f} | r* {p_rstar:.3f} vs r {r:.3f} | "
+              + (f"break p={p_row['p_magnitude_rw']:.3f}"
+                 if np.isfinite(p_row['p_magnitude_rw']) else "break uncomputable"))
         print("   per-alpha results below are DESCRIPTIVE, not the claim:")
     for v, n in out["verdict"].value_counts().items():
         print(f"   {n:3d}  {v}")
