@@ -94,7 +94,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
-ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "gemini-3.6-flash")
+ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "gemini-3.6-flash-v4")
 CONTROL_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "kakushadze-101-v1")
 DATA_PATH = os.path.join(ROOT_DIR, "data", "daily_ohlcv.parquet")
 OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
@@ -131,8 +131,53 @@ TRIM = 0.15                       # Andrews (1993)
 # whether it changed, but it is a change to the inferential standard and is
 # therefore OFF by default. Turning it on requires justifying it in the
 # methodology, not a config edit.
-TEST_MODE = "tost"                # "tost" (locked default) | "noninferiority"
-K_MDE = 2.927 if TEST_MODE == "tost" else 2.4865
+# RESOLVED. The master context section 7 locks "MDE gate at k = 2.4865
+# (one-sided non-inferiority)"; the comment above claiming section 7 locks
+# 2.927 contradicted it. Section 7 wins, and the substantive argument runs
+# the same way: TOST's upper test fails an alpha for IMPROVING out of sample,
+# but contamination predicts DEGRADATION, so the upper tail rejects on an
+# event the hypothesis does not predict. That is a false negative by
+# construction, not conservatism. Dropping it cuts required T_eff by
+# (2.4865/2.927)^2 = 0.72.
+TEST_MODE = "noninferiority"      # "noninferiority" (locked) | "tost"
+K_MDE = 2.4865 if TEST_MODE == "noninferiority" else 2.927
+
+# ---- PAIRING BASIS ----------------------------------------------------
+# "pc"    : first N_PCS principal components of the control panel.
+#           Unsupervised - PCs maximise explained variance OF THE CONTROLS,
+#           not of the treatment alpha, and sigma_d scales as sqrt(1 - R^2)
+#           where R^2 is against the TREATMENT series.
+# "ridge" : ridge regression on ALL control IC series, penalty chosen by
+#           BLOCKED time-series CV inside IS. Supervised, so it targets the
+#           quantity that actually governs sigma_d.
+# Both are fitted IS-only and applied unchanged out of sample, and both are
+# applied leave-one-out to the control arm so the FPR stays interpretable.
+PAIRING_BASIS = "ridge"           # "ridge" | "pc"
+RIDGE_LAMBDAS = [10.0 ** e for e in np.linspace(-4, 3, 29)]
+CV_BLOCKS = 5                     # contiguous blocks, no shuffling
+
+# ---- SIGN ORIENTATION -------------------------------------------------
+# An alpha and its negation are the SAME alpha under a different sign
+# convention. Pooling signed IC across alphas whose conventions differ makes
+# the arms cancel, which drives the pooled IS IC - and therefore
+# delta = r * IS_IC - towards zero for reasons that have nothing to do with
+# contamination. Orientation is an IS-ONLY decision (sign of the IS mean IC),
+# so no OOS information enters, and it is applied to the DIFFERENTIAL, which
+# flips exactly with the IC because beta flips too.
+#
+# It is NOT free: choosing the sign that makes IS look good biases |IS IC|
+# upward by roughly the standard error of the IS mean for an alpha whose true
+# IC is zero. That bias is estimated and reported, not assumed negligible.
+# Section 4's "no sign orientation is applied to the control corpus" is about
+# the PAIRING BASIS and is unaffected - the control basis stays unoriented.
+ORIENT_TREATMENT = True
+
+# ---- PRIMARY ESTIMAND -------------------------------------------------
+# "pooled"    : the model-level panel mean is the primary claim; per-alpha
+#               results are descriptive. Correct for the Recent Model Track,
+#               where section 4 already anticipates per-alpha power failure.
+# "per_alpha" : original behaviour.
+PRIMARY_ESTIMAND = "pooled"       # "pooled" | "per_alpha"
 
 # Number of control principal components used as the pairing basis. Loadings
 # are fitted on IS dates only and held fixed thereafter.
@@ -267,6 +312,149 @@ def load_phase1_ic(model_key):
             df = df.sort_index().apply(pd.to_numeric, errors="coerce")
             return df.dropna(axis=1, how="all"), c
     return None, None
+
+
+def alpha_ids_in_dir(alpha_dir):
+    """
+    The alpha_ids actually present as artifact JSONs in a directory.
+
+    THE PHASE 1 CSV IS THE FULL EVALUATED CORPUS, NOT THE SURVIVORS. Under
+    IC_SOURCE="phase1" the script previously loaded that CSV wholesale and
+    used ALPHA_DIR only to derive the model key string, so an alphas/survived/
+    directory holding 6 artifacts still produced a 19-alpha run. Every
+    downstream quantity - the pooled panel mean, N_eff, rho_bar, the median IS
+    Rank IC, delta - was then computed over a corpus that includes alphas the
+    DSR screen already REJECTED.
+
+    That is not a conservative error. DSR-rejected alphas have near-zero IS
+    IC, which (i) drags the pooled |IS IC| and therefore delta toward zero and
+    (ii) makes their sign close to a coin flip, so they cancel under pooling.
+    Both push the design away from certification for a reason that has nothing
+    to do with contamination.
+
+    Returns (ids, source) where source records how the id was obtained, or
+    (None, reason) if the directory cannot be read.
+    """
+    if not os.path.isdir(alpha_dir):
+        return None, f"directory not found: {alpha_dir}"
+    files = sorted(glob.glob(os.path.join(alpha_dir, "*.json")))
+    if not files:
+        # DISTINCT from "directory not found". A survivor directory that
+        # EXISTS and is EMPTY means the screen passed nothing. Section 9: a
+        # low or zero survivor count is a substantive finding, not a failed
+        # dissertation. Falling back to the full Phase 1 corpus here would
+        # silently replace that finding with a run on alphas the screen
+        # already rejected.
+        return [], f"directory exists but is EMPTY: {alpha_dir}"
+    ids = []
+    for fp in files:
+        stem = os.path.splitext(os.path.basename(fp))[0]
+        try:
+            rec = json.load(open(fp, encoding="utf-8"))
+            ids.append(str(rec.get("metadata", {}).get("alpha_id", stem)))
+        except Exception:
+            ids.append(stem)          # unreadable metadata; fall back to stem
+    return ids, f"{len(ids)} artifacts"
+
+
+def restrict_to_corpus(ic, alpha_dir, label, allow_all=False):
+    """
+    Restrict a Phase 1 IC panel to the alphas present in alpha_dir.
+
+    Matching is exact on column name first, then case-insensitively, then on
+    the filename stem, because Phase 1 column headers and artifact filenames
+    do not always agree. Anything still unmatched is reported by name rather
+    than dropped silently - a survivor that cannot be located in the IC panel
+    is a data problem, not a smaller corpus.
+    """
+    ids, note = alpha_ids_in_dir(alpha_dir)
+    if ids is not None and len(ids) == 0:
+        sys.exit(
+            f"\n[{label}] ZERO SURVIVING ALPHAS.\n  {note}\n\n"
+            "  This is a RESULT, not an error. Section 9: a low or zero "
+            "survivor count is a\n  substantive finding and thresholds must "
+            "not be relaxed to manufacture survivors.\n  Instrument 1 has "
+            "nothing to test, so it stops here rather than silently running\n"
+            "  on the full Phase 1 corpus (which contains alphas the DSR "
+            "screen rejected).\n\n  To inspect the unscreened corpus as a "
+            "DIAGNOSTIC, re-run with --include-all.")
+    if ids is None:
+        print(f"   ! [{label}] {note}")
+        print(f"     cannot restrict to the survivor corpus; using all "
+              f"{ic.shape[1]} columns in the Phase 1 CSV. VERIFY THIS IS WHAT "
+              "YOU WANT.")
+        return ic, None
+    cols = list(ic.columns)
+    lower = {c.lower(): c for c in cols}
+    keep, missing = [], []
+    for aid in ids:
+        if aid in ic.columns:
+            keep.append(aid)
+        elif aid.lower() in lower:
+            keep.append(lower[aid.lower()])
+        else:
+            missing.append(aid)
+    keep = list(dict.fromkeys(keep))
+    print(f"   [{label}] Phase 1 CSV has {len(cols)} alphas; {alpha_dir} holds "
+          f"{len(ids)} artifacts; matched {len(keep)}")
+    if missing:
+        print(f"      ! {len(missing)} artifact(s) NOT found in the IC panel: "
+              f"{', '.join(missing[:6])}"
+              + (" ..." if len(missing) > 6 else ""))
+        print("        These are survivors with no Phase 1 IC series. Fix "
+              "the naming or re-export; proceeding would silently shrink "
+              "the certification corpus.")
+    dropped = [c for c in cols if c not in keep]
+    if dropped:
+        print(f"      dropped {len(dropped)} non-survivor alpha(s) from the "
+              "Phase 1 corpus")
+    if allow_all:
+        print("      --include-all set: keeping the FULL Phase 1 corpus "
+              "anyway (diagnostic only, NOT the certification corpus).")
+        return ic, keep
+    if not keep:
+        sys.exit(f"[{label}] no Phase 1 IC columns matched the artifacts in "
+                 f"{alpha_dir}. Check alpha_id naming.")
+    return ic[keep], keep
+
+
+def corpus_feasibility(ic_full, keep, cutoff, L, r, k=K_MDE):
+    """
+    IS-ONLY comparison of the survivor corpus against the full Phase 1 corpus.
+
+    Screening moves two things in OPPOSITE directions and the net sign is not
+    obvious a priori:
+        delta = r * mean|IS IC|      rises  (survivors have stronger signal)
+        MDE   = k * sigma / sqrt(T)  rises  (fewer alphas -> smaller N_eff
+                                             -> larger sigma_pooled)
+    So a tighter screen helps only if it buys more in signal than it costs in
+    pooling. This prints the margin ratio delta/MDE for both corpora so the
+    section 8 DSR-threshold decision is settled with evidence.
+
+    Everything here is computed on IN-SAMPLE dates and the OOS window length
+    only. No OOS outcome is touched, so running it does not spend any
+    inferential budget.
+    """
+    is_m = ic_full.index < cutoff
+    rows = []
+    for name, cols in (("full Phase 1", list(ic_full.columns)),
+                       ("survivors", keep)):
+        if not cols:
+            continue
+        sub = ic_full[cols]
+        m = sub.loc[is_m].mean()
+        pooled = sub.mul(np.sign(m).replace(0, 1), axis=1).mean(axis=1)
+        _, _, T_p = paired_T_eff(pooled, cutoff, L)
+        _, sg_up = sigma_is_upper(pooled, cutoff)
+        mde = k * sg_up / np.sqrt(max(T_p, 1e-9)) if np.isfinite(T_p) else np.nan
+        d = r * float(m.abs().mean())
+        rows.append(dict(corpus=name, n=len(cols),
+                         mean_abs_is_ic=float(m.abs().mean()),
+                         sigma_pooled=float(pooled.loc[is_m].std(ddof=1)),
+                         T_eff=T_p, delta=d, mde=mde,
+                         margin_ratio=d / mde if np.isfinite(mde) and mde > 0
+                         else np.nan))
+    return pd.DataFrame(rows)
 
 
 def build_ic_panel(alpha_dir, panel, fwd, label, use_cache=True):
@@ -592,10 +780,43 @@ def mean_pairwise_corr(panel, min_overlap=60):
 
 
 def effective_n(n, rho):
+    """
+    N_eff = n / (1 + (n-1)*rho_bar), floored at rho_bar = 0.
+
+    n = 1 has no pairs, so rho_bar is undefined - but N_eff is still exactly 1
+    (a single series carries no pooling gain). Returning NaN there propagates
+    into the frontier and the MDE and silently voids the whole pooled block,
+    so the degenerate case is handled explicitly rather than by NaN.
+    """
+    if n <= 1:
+        return float(n)
     if not np.isfinite(rho):
-        return np.nan
+        return float(n)          # no reliable rho: assume independence, the
+                                 # OPTIMISTIC case, and flag it at the call site
     d = 1.0 + (n - 1) * max(rho, 0.0)
     return n / d if d > 0 else np.nan
+
+
+def rho_bar_reliability(n_pairs, rho):
+    """
+    Is rho_bar estimated from enough pairs to support a pooling-ceiling claim?
+
+    The ceiling 1/rho_bar is the quantity that decides whether generating more
+    alphas keeps paying, so it must not be read off an estimate built from a
+    handful of pairs. At n = 2 there is ONE pair and the point estimate is
+    almost pure noise; a negative value there is a sampling artifact, not
+    evidence of diversification beyond independence.
+
+    Approximate SE of a single correlation is 1/sqrt(T-3); averaging over
+    n_pairs correlations that are themselves dependent gives at best
+    SE / sqrt(n_pairs). Deliberately conservative.
+    """
+    if not np.isfinite(rho) or n_pairs < 1:
+        return "undefined", np.nan
+    if n_pairs < 10:
+        return "unreliable", np.nan
+    return ("positive" if rho > 0.001 else "at-or-below-zero"), 1.0 / rho \
+        if rho > 0.001 else np.nan
 
 
 def frontier_ic(sigma, r, T_eff, N_eff=1.0, k=K_MDE):
@@ -607,6 +828,220 @@ def frontier_ic(sigma, r, T_eff, N_eff=1.0, k=K_MDE):
 # =========================================================
 # 3. DIFFERENTIALS AND MARGIN
 # =========================================================
+
+def delta_star(diff, se, cv_hi, cv_lo=None, mode=TEST_MODE):
+    """
+    The SMALLEST margin at which non-inferiority is established at ALPHA_LEVEL.
+
+    Certification currently answers one binary question at one pre-specified
+    delta. That collapses two very different findings into the same verdict:
+    an alpha that misses by a hair and an alpha that misses by an order of
+    magnitude both print "NOT CERTIFIED". delta* separates them.
+
+    The test certifies iff (diff + delta)/se > cv_hi, so
+
+        delta* = max(0, cv_hi * se - diff)
+
+    is closed-form - neither se nor cv depends on delta. Under TOST the upper
+    tail adds the constraint delta > diff - cv_lo*se, and delta* is the max.
+
+    Reported as an EQUIVALENT r*: delta* / |IS_IC|, directly comparable to the
+    control-calibrated r. r* = 0.31 against r = 0.26 says the alpha is a near
+    miss; r* = 4.8 says the window cannot resolve the question at all. This
+    changes NOTHING about who certifies - the threshold does not move - it
+    makes the null informative and gives a continuous quantity that can be
+    regressed on cutoff recency.
+    """
+    if not all(np.isfinite([diff, se, cv_hi])) or se <= 0:
+        return np.nan
+    d_lo = cv_hi * se - diff
+    if mode != "noninferiority" and cv_lo is not None and np.isfinite(cv_lo):
+        d_lo = max(d_lo, diff - cv_lo * se)
+    return float(max(d_lo, 0.0))
+
+
+def orient_signs(trt_ic, cutoff):
+    """
+    Sign of each alpha's IS mean Rank IC, plus the bias that choosing it costs.
+
+    Returns (signs, diag). diag carries the orientation-selection bias: for an
+    alpha whose true IC is zero, taking |IS mean| rather than the signed mean
+    inflates it by E|N(0, se)| = se * sqrt(2/pi). Reported per alpha so the
+    reader can see which |IS IC| values survive the correction and which are
+    indistinguishable from an oriented coin flip.
+    """
+    is_m = trt_ic.index < cutoff
+    means, ses, signs = {}, {}, {}
+    for c in trt_ic.columns:
+        x = trt_ic[c].loc[is_m].dropna()
+        if len(x) < MIN_SIDE_OBS:
+            signs[c] = 1.0
+            means[c] = np.nan
+            ses[c] = np.nan
+            continue
+        m = float(x.mean())
+        means[c] = m
+        v = nw_var_mean(x)
+        ses[c] = float(np.sqrt(v)) if np.isfinite(v) and v > 0 else np.nan
+        signs[c] = -1.0 if m < 0 else 1.0
+    means, ses = pd.Series(means), pd.Series(ses)
+    bias = ses * np.sqrt(2.0 / np.pi)
+    diag = pd.DataFrame(dict(
+        is_ic_signed=means, is_ic_abs=means.abs(), se_is_mean=ses,
+        orient_bias=bias,
+        is_ic_abs_debiased=(means.abs() - bias).clip(lower=0.0),
+        t_stat=means.abs() / ses.replace(0.0, np.nan)))
+    return pd.Series(signs), diag
+
+
+def _blocked_ridge(y, X, lambdas=RIDGE_LAMBDAS, n_blocks=CV_BLOCKS):
+    """
+    Ridge with the penalty chosen by CONTIGUOUS-BLOCK time-series CV.
+
+    Returns (coef_with_intercept, lam, r2_fit, r2_heldout).
+
+    r2_heldout is the number that matters and the one the PC path never
+    reported. A basis fitted IS and projected OOS inflates the OOS residual by
+    exactly its overfit, and an inflated OOS residual biases the measured
+    shift TOWARDS finding degradation. Fitted R^2 cannot detect that; blocked
+    held-out R^2 can. Blocks are contiguous and never shuffled, because
+    shuffling leaks across the serial dependence the differential carries.
+    """
+    y = np.asarray(y, float)
+    X = np.asarray(X, float)
+    n, k = X.shape
+    if n < max(4 * n_blocks, 60) or k < 1:
+        return None, np.nan, np.nan, np.nan
+    edges = np.linspace(0, n, n_blocks + 1).astype(int)
+    mu_x, sd_x = X.mean(0), X.std(0, ddof=1)
+    sd_x[sd_x <= 0] = 1.0
+
+    def fit(Xtr, ytr, lam):
+        Z = (Xtr - mu_x) / sd_x
+        A = Z.T @ Z + lam * n * np.eye(k)
+        try:
+            w = np.linalg.solve(A, Z.T @ (ytr - ytr.mean()))
+        except np.linalg.LinAlgError:
+            return None, None
+        return w, float(ytr.mean())
+
+    # Precompute per-fold Gram matrices ONCE; the lambda sweep then costs only
+    # a Cholesky solve per (fold, lambda) instead of re-forming Z'Z each time.
+    Z = (X - mu_x) / sd_x
+    folds = []
+    for b in range(n_blocks):
+        te = np.zeros(n, bool)
+        te[edges[b]:edges[b + 1]] = True
+        if te.sum() < 5 or (~te).sum() < 20:
+            return None, np.nan, np.nan, np.nan
+        Ztr, ytr = Z[~te], y[~te]
+        ybar = float(ytr.mean())
+        folds.append((Ztr.T @ Ztr, Ztr.T @ (ytr - ybar), ybar,
+                      Z[te], y[te], Ztr.shape[0]))
+    I = np.eye(k)
+    best, best_sse = None, np.inf
+    for lam in lambdas:
+        sse, ok = 0.0, True
+        for G, c_, ybar, Zte, yte, ntr in folds:
+            try:
+                w = np.linalg.solve(G + lam * ntr * I, c_)
+            except np.linalg.LinAlgError:
+                ok = False
+                break
+            sse += float(((yte - (Zte @ w + ybar)) ** 2).sum())
+        if ok and sse < best_sse:
+            best_sse, best = sse, lam
+    if best is None:
+        return None, np.nan, np.nan, np.nan
+
+    sst = float(((y - y.mean()) ** 2).sum())
+    r2_ho = 1.0 - best_sse / sst if sst > 0 else np.nan
+    w, b0 = fit(X, y, best)
+    if w is None:
+        return None, np.nan, np.nan, np.nan
+    fitted = ((X - mu_x) / sd_x) @ w + b0
+    r2_fit = 1.0 - float(((y - fitted) ** 2).sum()) / sst if sst > 0 else np.nan
+    # fold the standardisation into plain coefficients on the raw columns
+    coef = w / sd_x
+    intercept = b0 - float(mu_x @ coef)
+    return np.concatenate([[intercept], coef]), float(best), float(r2_fit), float(r2_ho)
+
+
+def build_differentials_ridge(trt_ic, ctrl_ic, cutoff,
+                              lambdas=RIDGE_LAMBDAS, n_blocks=CV_BLOCKS):
+    """
+    d_i(t) = IC_i(t) - [b0 + sum_j w_ij * Ctrl_j(t)], w from IS-only ridge.
+
+    Supervised counterpart to build_differentials_pc. The PC basis maximises
+    variance explained OF THE CONTROL PANEL; sigma_d scales as sqrt(1 - R^2)
+    with R^2 measured against the TREATMENT series, which is a different
+    objective. Regressing on all controls targets the right one directly, and
+    ridge plus blocked CV keeps it honest at k regressors.
+
+    Complete-case on the control columns for the fit, mean-filled for the
+    projection, mirroring control_factors so the two bases stay comparable.
+    """
+    is_m = ctrl_ic.index < cutoff
+    X_is = ctrl_ic.loc[is_m]
+    X_cc = X_is.dropna(axis=0, how="any")
+    if X_cc.shape[0] < 60 or X_cc.shape[1] < 2:
+        return None, None, None, None
+    mu = X_cc.mean()
+    Xall = ctrl_ic.fillna(mu)
+    diffs, r2f, r2h, lams, paired = {}, {}, {}, {}, {}
+    for c in trt_ic.columns:
+        y_is = trt_ic[c].loc[is_m]
+        idx = X_cc.index.intersection(y_is.dropna().index)
+        if len(idx) < 60:
+            diffs[c] = trt_ic[c]
+            r2f[c] = r2h[c] = lams[c] = np.nan
+            paired[c] = False
+            continue
+        beta, lam, rf, rh = _blocked_ridge(y_is.loc[idx].to_numpy(float),
+                                           X_cc.loc[idx].to_numpy(float),
+                                           lambdas, n_blocks)
+        if beta is None:
+            diffs[c] = trt_ic[c]
+            r2f[c] = r2h[c] = lams[c] = np.nan
+            paired[c] = False
+            continue
+        fitted = beta[0] + Xall.to_numpy(float) @ beta[1:]
+        diffs[c] = trt_ic[c] - pd.Series(fitted, index=ctrl_ic.index)
+        r2f[c], r2h[c], lams[c], paired[c] = rf, rh, lam, True
+    return (pd.DataFrame(diffs), pd.Series(r2f), pd.Series(r2h),
+            pd.Series(lams), pd.Series(paired))
+
+
+def loo_control_differentials_ridge(ctrl_ic, cutoff,
+                                    lambdas=RIDGE_LAMBDAS, n_blocks=CV_BLOCKS):
+    """
+    Leave-one-out ridge differencing through the IDENTICAL pipeline.
+
+    Mandatory for the same reason as the PC version: section 4 makes the
+    control certification rate the pipeline's false-positive rate, so any
+    asymmetry between the arms makes that sentence false.
+    """
+    out, r2f, r2h, paired = {}, {}, {}, {}
+    cols = list(ctrl_ic.columns)
+    for i, c in enumerate(cols, 1):
+        others = ctrl_ic[[x for x in cols if x != c]]
+        res = build_differentials_ridge(ctrl_ic[[c]], others, cutoff,
+                                        lambdas, n_blocks)
+        if res[0] is None:
+            out[c] = ctrl_ic[c]
+            r2f[c] = r2h[c] = np.nan
+            paired[c] = False
+        else:
+            d, rf, rh, _, pr = res
+            out[c] = d[c]
+            r2f[c] = float(rf.get(c, np.nan))
+            r2h[c] = float(rh.get(c, np.nan))
+            paired[c] = bool(pr.get(c, False))
+        if i % 10 == 0 or i == len(cols):
+            print(f"      LOO ridge {i}/{len(cols)}", end="\r")
+    print()
+    return pd.DataFrame(out), pd.Series(r2f), pd.Series(r2h), pd.Series(paired)
+
 
 def control_factors(ctrl_ic, cutoff, n_pcs=N_PCS):
     """
@@ -998,6 +1433,13 @@ def main():
                     choices=["symmetric", "asymmetric"])
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--ic-source", default=None, choices=["phase1", "recompute"])
+    ap.add_argument("--include-all", action="store_true",
+                    help="do NOT restrict the Phase 1 IC panel to the alphas "
+                         "present in --alpha-dir. Diagnostic only: the "
+                         "certification corpus is the survivor set.")
+    ap.add_argument("--screen-controls", action="store_true",
+                    help="restrict the control arm to artifacts in "
+                         "--control-dir as well. See section 8 note.")
     a = ap.parse_args()
 
     global WINDOW_MODE, IC_SOURCE
@@ -1034,6 +1476,25 @@ def main():
                 "(NOTE: recomputing may not reproduce the Phase 1 series exactly).")
         print(f"   [control] {ctrl_ic.shape[1]} alphas  {cpath}")
         print(f"   [{model}] {trt_ic.shape[1]} alphas  {tpath}")
+        # The Phase 1 CSV is the FULL evaluated corpus. The certification
+        # corpus is the survivor set in --alpha-dir. See restrict_to_corpus.
+        trt_full = trt_ic.copy()
+        trt_ic, keep_ids = restrict_to_corpus(trt_ic, a.alpha_dir, model,
+                                              allow_all=a.include_all)
+        if a.screen_controls:
+            ctrl_ic, _ = restrict_to_corpus(ctrl_ic, a.control_dir, "control")
+        else:
+            print("   [control] NOT screened - full corpus retained.")
+            print("      Section 8 open decision: the control corpus plays two "
+                  "roles. As the PAIRING")
+            print("      BASIS more donors is strictly better and screening "
+                  "would only cost R^2. As the")
+            print("      FPR CALIBRATION the arms should be symmetric, so an "
+                  "unscreened control arm")
+            print("      measures the false-positive rate on a different "
+                  "population from the treatment")
+            print("      arm. Re-run with --screen-controls to see the "
+                  "sensitivity; report both.")
     else:
         print("   ! recomputing IC; this may differ from the Phase 1 series "
               "the DSR screen used.")
@@ -1041,6 +1502,7 @@ def main():
         fwd = forward_returns(panel)
         ctrl_ic = build_ic_panel(a.control_dir, panel, fwd, "control", not a.no_cache)
         trt_ic = build_ic_panel(a.alpha_dir, panel, fwd, model, not a.no_cache)
+        trt_full, keep_ids = trt_ic.copy(), list(trt_ic.columns)
 
     common = ctrl_ic.index.intersection(trt_ic.index)
     ctrl_ic, trt_ic = ctrl_ic.loc[common], trt_ic.loc[common]
@@ -1049,9 +1511,69 @@ def main():
     if L < MIN_SIDE_OBS:
         sys.exit(f"Only {L} trading days after {cutoff.date()}; nothing estimable.")
 
-    print("\n[2/6] building paired differentials (multi-factor PC basis)")
-    factors, evr, n_imp = control_factors(ctrl_ic, cutoff)
-    if factors is None:
+    # ---- SIGN ORIENTATION (IS-only) ----------------------------------
+    signs, sdiag = orient_signs(trt_ic, cutoff)
+    n_flip = int((signs < 0).sum())
+    raw_signed = float(sdiag["is_ic_signed"].mean())
+    raw_abs = float(sdiag["is_ic_abs"].mean())
+    if ORIENT_TREATMENT:
+        print(f"\n[1b/6] sign orientation: {n_flip} of {len(signs)} alphas flipped "
+              "(sign of IS mean IC; IS-only decision)")
+        print(f"   mean IS IC  signed {raw_signed:+.5f}  ->  oriented {raw_abs:.5f}"
+              f"   ({raw_abs/max(abs(raw_signed),1e-12):.1f}x)")
+        print(f"   orientation-selection bias: mean {sdiag['orient_bias'].mean():.5f}"
+              f"  -> debiased mean |IS IC| {sdiag['is_ic_abs_debiased'].mean():.5f}")
+        n_weak = int((sdiag["t_stat"] < 2.0).sum())
+        if n_weak:
+            print(f"   ! {n_weak} of {len(signs)} alphas have |IS IC| within 2 SE of "
+                  "zero; their orientation is close to a coin flip and their "
+                  "delta is correspondingly unreliable. Flagged per-alpha.")
+        trt_ic = trt_ic.mul(signs, axis=1)
+    else:
+        print(f"\n[1b/6] sign orientation DISABLED. mean IS IC signed "
+              f"{raw_signed:+.5f} vs oriented {raw_abs:.5f}; if these differ "
+              "materially the pooled claim is cancelling arms against each other.")
+
+    print(f"\n[2/6] building paired differentials ({PAIRING_BASIS} basis)")
+    r2_ho = None
+    if PAIRING_BASIS == "ridge":
+        res = build_differentials_ridge(trt_ic, ctrl_ic, cutoff)
+        if res[0] is not None:
+            diff, r2s, r2_ho, lams, paired = res
+            betas = pd.Series(np.nan, index=diff.columns)
+            print(f"   ridge on {ctrl_ic.shape[1]} control series, "
+                  f"blocked CV ({CV_BLOCKS} contiguous folds)")
+            print(f"   median lambda {lams.median():.4g} | "
+                  f"R^2 fitted {r2s.median():.3f} -> HELD-OUT {r2_ho.median():.3f}"
+                  f"   (overfit gap {r2s.median()-r2_ho.median():+.3f})")
+            print("   applying the IDENTICAL ridge pipeline to the control arm "
+                  "(leave-one-out)...")
+            loo, loo_r2, loo_r2_ho, loo_paired = \
+                loo_control_differentials_ridge(ctrl_ic, cutoff)
+            # PC comparison, so the basis choice is evidenced not asserted
+            _f, _e, _ = control_factors(ctrl_ic, cutoff)
+            if _f is not None:
+                _d, _r2, _, _ = build_differentials_pc(trt_ic, _f, cutoff)
+                s_pc = float(_d.std(ddof=1).median())
+                s_rg = float(diff.std(ddof=1).median())
+                print(f"   BASIS COMPARISON  sigma_d  PC {s_pc:.4f} -> "
+                      f"ridge {s_rg:.4f}  ({100*(1-s_rg/max(s_pc,1e-12)):+.1f}%)"
+                      f"   [required T scales with sigma^2: "
+                      f"x{(s_rg/max(s_pc,1e-12))**2:.2f}]")
+                if s_rg >= s_pc:
+                    print("      ! ridge did NOT beat the PC basis. The control "
+                          "corpus explains no more of the treatment IC than its "
+                          "own leading PCs do. Report and keep PC.")
+            basis_done = True
+        else:
+            print("   ! ridge basis unavailable; falling back to PC")
+            basis_done = False
+    else:
+        basis_done = False
+
+    if not basis_done:
+        factors, evr, n_imp = control_factors(ctrl_ic, cutoff)
+    if not basis_done and factors is None:
         print("   ! PC basis unavailable; falling back to the control mean")
         cm = ctrl_ic.mean(axis=1, skipna=True).rename("ctrl_mean")
         cm = cm.mask(ctrl_ic.notna().sum(axis=1) < 10)
@@ -1059,7 +1581,7 @@ def main():
         r2s = rhos ** 2
         paired = pd.Series(True, index=diff.columns)
         loo, loo_r2, loo_paired = loo_control_differentials(ctrl_ic, cutoff), None, None
-    else:
+    elif not basis_done:
         print(f"   {factors.shape[1]} PCs from control panel "
               f"({100*evr:.1f}% of control IC variance, complete-case IS loadings;"
               f" {n_imp} dates had >=1 missing control at projection)")
@@ -1122,6 +1644,26 @@ def main():
         print(f"   ! falling back to r = {r} (LITERATURE IMPORT - McLean & Pontiff "
               "post-sample; flag the horizon caveat in the write-up)")
 
+    if keep_ids and trt_full.shape[1] > trt_ic.shape[1]:
+        feas = corpus_feasibility(trt_full.loc[common], keep_ids, cutoff, L, r)
+        print("\n[3b/6] corpus feasibility - was the screen worth it? "
+              "(IS-ONLY; no OOS outcome touched)")
+        for _, w in feas.iterrows():
+            print(f"   {w['corpus']:>13}  n={int(w['n']):3d}  "
+                  f"mean|IS IC| {w['mean_abs_is_ic']:.4f}  "
+                  f"sigma_pooled {w['sigma_pooled']:.4f}  "
+                  f"delta {w['delta']:.5f}  MDE {w['mde']:.5f}  "
+                  f"delta/MDE {w['margin_ratio']:.2f}")
+        if len(feas) == 2:
+            fr, sr = feas.iloc[0]["margin_ratio"], feas.iloc[1]["margin_ratio"]
+            if np.isfinite(fr) and np.isfinite(sr):
+                print(f"   -> screening changed the margin ratio "
+                      f"{fr:.2f} -> {sr:.2f} ({'BETTER' if sr > fr else 'WORSE'}). "
+                      "Screening buys signal but\n      costs N_eff; this is "
+                      "the evidence for the section 8 DSR-threshold decision.")
+        feas.to_csv(os.path.join(OUT_DIR, f"corpus_feasibility_{model}.csv"),
+                    index=False)
+
     print("\n[4/6] Method A - break tests with length-matched placebos")
     res, pl_mag, pl_prox, n_indep = method_a(diff, cutoff, L, model)
     loo_res, _, _, _ = method_a(loo, cutoff, L, "control FPR")
@@ -1158,6 +1700,11 @@ def main():
             tost_diff=t["diff"], tost_se=t["se"],
             tost_cv=t["cv"], tost_cv_lo=t["cv_lo"],
             cv_source=t["cv_source"], equivalent=t["equivalent"],
+            delta_star=delta_star(t["diff"], t["se"], t["cv"], t["cv_lo"]),
+            r_star=(delta_star(t["diff"], t["se"], t["cv"], t["cv_lo"])
+                    / abs(is_ic) if abs(is_ic) > MIN_IS_IC_FOR_R else np.nan),
+            is_ic_t=float(sdiag["t_stat"].get(c, np.nan)),
+            flipped=bool(signs.get(c, 1.0) < 0),
             magnitude=res.loc[c, "magnitude"], p_magnitude=res.loc[c, "p_magnitude"],
             p_magnitude_rw=res.loc[c, "p_magnitude_rw"],
             break_offset=res.loc[c, "break_offset"],
@@ -1189,15 +1736,43 @@ def main():
         t = tost(sd, cutoff, L, delta)
         ctrl_rows.append(dict(alpha_id=c, delta=delta, mde=mde, power_ok=pok,
                               equivalent=t["equivalent"],
+                              delta_star=delta_star(t["diff"], t["se"],
+                                                    t["cv"], t["cv_lo"]),
+                              r_star=(delta_star(t["diff"], t["se"], t["cv"],
+                                                 t["cv_lo"]) / abs(is_ic)
+                                      if abs(is_ic) > MIN_IS_IC_FOR_R else np.nan),
                               verdict=verdict(loo_res.loc[c], t["equivalent"], pok)))
     ctrl_out = pd.DataFrame(ctrl_rows).set_index("alpha_id") if ctrl_rows \
         else pd.DataFrame(columns=["verdict"])
     ctrl_cert = (float((ctrl_out["verdict"] == "CERTIFIED").mean())
                  if len(ctrl_out) else np.nan)
+    _rs = out["r_star"].dropna()
+    _cs = ctrl_out["r_star"].dropna() if "r_star" in ctrl_out else pd.Series(dtype=float)
+    if len(_rs):
+        print(f"   delta* / r*  (smallest certifying margin as a multiple of "
+              f"|IS IC|)")
+        print(f"      treatment  median r* {_rs.median():.2f}  "
+              f"min {_rs.min():.2f}  max {_rs.max():.2f}")
+        if len(_cs):
+            print(f"      control    median r* {_cs.median():.2f}   "
+                  "<- what an UNCONTAMINATED alpha needs at this window length")
+        print(f"      alphas with r* <= r={r:.3f}: "
+              f"{int((_rs <= r).sum())} of {len(_rs)}")
     print(f"   control CERTIFICATION rate (full pipeline FPR): {ctrl_cert:.3f}"
           f"  over {len(ctrl_out)} controls")
 
-    print("\n[6/6] pooled model-level claim (equal-weighted panel mean, spec 73)")
+    hdr = ("PRIMARY ESTIMAND" if PRIMARY_ESTIMAND == "pooled" else "fallback")
+    print(f"\n[6/6] POOLED model-level claim - {hdr} (equal-weighted panel mean)")
+    if PRIMARY_ESTIMAND == "pooled":
+        print("   Section 4 already anticipates per-alpha power failure below "
+              "~15 months OOS.\n   Pooling is a choice of ESTIMAND that is "
+              "identified at this sample size, not a\n   relaxation of the "
+              "threshold: r, k and the frontier are all unchanged.")
+    if diff.shape[1] < 2:
+        print("   ! n = 1. This is NOT a pooled claim - it is the single "
+              "surviving alpha's\n     per-alpha test relabelled. There is no "
+              "variance reduction and no N_eff\n     gain. Report it as a "
+              "per-alpha result.")
     pooled = diff.mean(axis=1)
     p_is = float(trt_ic.loc[trt_ic.index < cutoff].mean().mean())
     p_delta = r * abs(p_is)
@@ -1208,10 +1783,67 @@ def main():
     p_mde = K_MDE * p_sig_up / np.sqrt(max(p_Teff, 1e-9))
     p_tost = tost(pooled, cutoff, L, p_delta)
     pooled_ok = np.isfinite(p_mde) and p_mde <= p_delta
+    p_dstar = delta_star(p_tost["diff"], p_tost["se"], p_tost["cv"],
+                         p_tost["cv_lo"])
+    p_rstar = p_dstar / abs(p_is) if abs(p_is) > MIN_IS_IC_FOR_R else np.nan
+    p_sig = float(pooled.loc[pooled.index < cutoff].std(ddof=1))
+    print(f"   sigma_pooled {p_sig:.5f} (per-alpha {sig_d:.5f}; "
+          f"variance-reduction factor {sig_d/max(p_sig,1e-12):.2f}x, "
+          f"N_eff {N_eff:.1f})")
+    _stat, _ceil = rho_bar_reliability(npairs, rho_bar)
+    if _stat == "positive":
+        print(f"   pooling ceiling 1/rho_bar = {_ceil:.1f} alphas "
+              f"(rho_bar {rho_bar:+.4f} over {npairs} pairs); beyond that, "
+              "more alphas stop paying")
+    elif _stat == "at-or-below-zero":
+        print(f"   rho_bar {rho_bar:+.4f} over {npairs} pairs is at or below "
+              "zero: no ceiling is detectable,\n      so more alphas keep "
+              "paying at roughly the independent rate. Treat as a LOWER "
+              "bound\n      on the gain, not a guarantee.")
+    else:
+        print(f"   rho_bar NOT reliably estimable ({npairs} pairs). N_eff is "
+              "set to n, which ASSUMES\n      independence and is therefore "
+              "the OPTIMISTIC case - the true pooling gain can only\n      be "
+              "smaller. Flag this in the write-up.")
     print(f"   T_eff paired {p_Teff:.0f} (OOS arm {p_Teff_oos:.0f})"
           f" | delta {p_delta:.5f} | MDE {p_mde:.5f}"
           f" -> {'PASSES' if pooled_ok else 'FAILS'} the gate")
-    print(f"   equivalence: {p_tost['equivalent']}")
+    print(f"   equivalence: {p_tost['equivalent']}   "
+          f"(MDE/delta = {p_mde/max(p_delta,1e-12):.2f})")
+    print(f"   delta* pooled {p_dstar:.5f}  ->  r* = {p_rstar:.3f}"
+          f"   against control-calibrated r = {r:.3f}")
+    if np.isfinite(p_rstar):
+        if not pooled_ok:
+            # Section 1: low power counts AGAINST certification, and section 4
+            # makes MDE > delta a fail. delta* <= delta with the gate failed
+            # means the realised draw was favourable at a sample size that
+            # could not have detected the alternative - a lucky draw, not
+            # evidence. delta* is still reported; it just cannot certify.
+            print("   -> NOT CERTIFIED (power-insufficient): MDE > delta, so "
+                  "the gate binds\n      REGARDLESS of delta*. "
+                  + (f"delta* ({p_dstar:.5f}) is below delta ({p_delta:.5f}), "
+                     "but at\n      this T_eff the design could not have "
+                     "detected the alternative, so the\n      pass is "
+                     "uninformative rather than affirmative."
+                     if p_dstar <= p_delta else
+                     "delta* exceeds delta as well."))
+        elif p_rstar <= r:
+            print("   -> POOLED CERTIFIED: excess decay ruled out at the "
+                  "control-calibrated tolerance, with the MDE gate satisfied.")
+        else:
+            print(f"   -> NOT CERTIFIED, but BOUNDED: LLM-specific excess decay "
+                  f"ruled out\n      above {100*p_rstar:.0f}% of IS IC at "
+                  f"{100*(1-ALPHA_LEVEL):.0f}% confidence. The margin needed is "
+                  f"{p_rstar/max(r,1e-12):.1f}x\n      the control norm - report "
+                  "this as the resolution of the design, not as evidence\n      "
+                  "of contamination.")
+    # what would close the remaining gap, in the units the frontier uses
+    if np.isfinite(p_rstar) and p_rstar > r and np.isfinite(p_delta):
+        need = (p_mde / max(p_delta, 1e-12)) ** 2
+        print(f"   TO CLOSE THE GAP: need T_eff x{need:.1f} (= {need*p_Teff:.0f} "
+              f"days), or sigma_pooled x{1/np.sqrt(need):.2f},\n      or mean "
+              f"|IS IC| x{np.sqrt(need):.1f} (= {abs(p_is)*np.sqrt(need):.4f}). "
+              "Length is the sqrt lever; the other two are linear.")
 
     # ---- report ----
     out.to_csv(os.path.join(OUT_DIR, f"instrument1_{model}.csv"))
@@ -1222,8 +1854,22 @@ def main():
         ctrl_out.to_csv(os.path.join(OUT_DIR, "control_fpr_full.csv"))
 
     print("\n" + "=" * 62)
-    print("VERDICTS")
+    print("VERDICTS" + ("   [PRIMARY = POOLED MODEL-LEVEL CLAIM]"
+                        if PRIMARY_ESTIMAND == "pooled" else ""))
     print("=" * 62)
+    if PRIMARY_ESTIMAND == "pooled":
+        # gate first, then the test - same order as verdict() per alpha
+        if not pooled_ok:
+            _pv = "NOT CERTIFIED (power-insufficient)"
+        elif np.isfinite(p_rstar) and p_rstar <= r and p_tost["equivalent"]:
+            _pv = "CERTIFIED"
+        else:
+            _pv = "NOT CERTIFIED (decay beyond delta)"
+        print(f"   POOLED ({model}, n={diff.shape[1]}, N_eff={N_eff:.1f}, "
+              f"T_eff={p_Teff:.0f}): {_pv}")
+        print(f"      delta {p_delta:.5f} | MDE {p_mde:.5f} | "
+              f"delta* {p_dstar:.5f} | r* {p_rstar:.3f} vs r {r:.3f}")
+        print("   per-alpha results below are DESCRIPTIVE, not the claim:")
     for v, n in out["verdict"].value_counts().items():
         print(f"   {n:3d}  {v}")
     cert = out.index[out["verdict"] == "CERTIFIED"].tolist()
