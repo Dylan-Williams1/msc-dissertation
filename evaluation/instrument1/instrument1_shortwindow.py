@@ -92,8 +92,35 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # =========================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
+
+def _find_project_root(start, marker="alphas", max_up=5):
+    """
+    Walk UP from the script looking for the directory that contains alphas/.
+
+    ROOT_DIR was hardcoded as the script's parent, which is only correct when
+    the script sits one level under the project root. Placed at
+    <root>/evaluation/instrument1/ it resolved to <root>/evaluation and looked
+    for <root>/evaluation/alphas/survived/..., which does not exist - and the
+    survivor restriction then failed OPEN, running on the full unscreened
+    Phase 1 corpus. Searching for the marker makes the default correct
+    wherever the script is placed.
+    """
+    d = start
+    for _ in range(max_up):
+        if os.path.isdir(os.path.join(d, marker)):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return os.path.dirname(start)
+
+
+ROOT_DIR = _find_project_root(SCRIPT_DIR)
+
+# The BASENAME of this directory is the model key: it selects
+# phase1_daily_rank_ic_<basename>.csv. Folder name and CSV suffix must agree.
 ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "gemini-3.6-flash-v4")
 CONTROL_DIR = os.path.join(ROOT_DIR, "alphas", "survived", "kakushadze-101-v1")
 DATA_PATH = os.path.join(ROOT_DIR, "data", "daily_ohlcv.parquet")
@@ -216,6 +243,23 @@ R_FALLBACK = 0.26
 # An alpha with a near-zero IS IC gives a meaningless decay RATIO (shift/IS_IC
 # explodes). Such alphas are excluded from the r estimate. They are still
 # tested - they simply cannot inform the margin.
+# WHICH r TO USE.
+# "point"  : the noise-corrected point estimate, r = 1.2816*sqrt(Var_true).
+# "upper"  : the 97.5th bootstrap percentile.
+#
+# The original code used "upper", which is INCOHERENT with sigma_is_upper:
+# sigma takes its CONSERVATIVE bound (inflating the MDE, harder to certify)
+# while r took its LIBERAL bound (inflating delta, easier to certify). Two
+# nuisance parameters, the same class of uncertainty, resolved in opposite
+# directions. "point" resolves both the same way and puts the uncertainty
+# where it belongs - in the reported interval, not in the threshold.
+#
+# It also matters mechanically: MAX_PLAUSIBLE_R was applied to whichever value
+# was selected, so a point estimate of 0.75 could be discarded because the
+# upper end of its interval crossed 1.0, dropping the design onto the
+# literature constant despite the control arm having successfully measured r.
+R_ESTIMATOR = "point"             # "point" | "upper"
+
 MIN_IS_IC_FOR_R = 0.005
 MAX_PLAUSIBLE_R = 1.0
 
@@ -311,7 +355,36 @@ def load_phase1_ic(model_key):
             df.index.name = "date"
             df = df.sort_index().apply(pd.to_numeric, errors="coerce")
             return df.dropna(axis=1, how="all"), c
-    return None, None
+
+    # Exact match failed. The model key is the BASENAME of --alpha-dir, so the
+    # usual cause is a folder name whose suffix does not match the exported
+    # CSV (e.g. .../survived/gemini-3.6-flash against
+    # phase1_daily_rank_ic_gemini-3.6-flash-v4.csv). Silently substituting
+    # another model's IC series would be far worse than failing, so this
+    # reports what exists and resolves ONLY an unambiguous prefix match.
+    prefix = "phase1_daily_rank_ic_"
+    seen, avail = set(), []
+    for rt in roots:
+        for h in sorted(glob.glob(os.path.join(rt, prefix + "*.csv"))):
+            base = os.path.basename(h)
+            if base not in seen:
+                seen.add(base)
+                avail.append(h)
+    keys = [os.path.basename(h)[len(prefix):-4] for h in avail]
+    near = [(h, k) for h, k in zip(avail, keys)
+            if k.startswith(model_key) or model_key.startswith(k)]
+    if len(near) == 1:
+        h, k = near[0]
+        print("   ! no CSV for model key " + repr(model_key)
+              + "; resolved UNAMBIGUOUSLY to " + repr(k) + ".")
+        print("     Rename the alpha directory to " + repr(k) + " so the model")
+        print("     key and the CSV agree, or pass --alpha-dir explicitly.")
+        df = pd.read_csv(h, index_col=0)
+        df.index = pd.to_datetime(df.index)
+        df.index.name = "date"
+        df = df.sort_index().apply(pd.to_numeric, errors="coerce")
+        return df.dropna(axis=1, how="all"), h
+    return None, (keys, [k for _, k in near])
 
 
 def alpha_ids_in_dir(alpha_dir):
@@ -379,11 +452,28 @@ def restrict_to_corpus(ic, alpha_dir, label, allow_all=False):
             "screen rejected).\n\n  To inspect the unscreened corpus as a "
             "DIAGNOSTIC, re-run with --include-all.")
     if ids is None:
-        print(f"   ! [{label}] {note}")
-        print(f"     cannot restrict to the survivor corpus; using all "
-              f"{ic.shape[1]} columns in the Phase 1 CSV. VERIFY THIS IS WHAT "
-              "YOU WANT.")
-        return ic, None
+        if allow_all:
+            print(f"   ! [{label}] {note}")
+            print(f"     --include-all set: proceeding on all {ic.shape[1]} "
+                  "Phase 1 columns as a DIAGNOSTIC.")
+            return ic, None
+        # FAIL CLOSED. Previously this warned and returned the full Phase 1
+        # panel, which silently substitutes the UNSCREENED corpus - alphas the
+        # DSR screen already rejected - for the certification corpus. Every
+        # downstream quantity (pooled mean, N_eff, rho_bar, delta) is then
+        # computed on the wrong population, and the only trace is one warning
+        # line among fifty. A path error must not be able to change what is
+        # being certified.
+        sys.exit(
+            f"\n[{label}] SURVIVOR DIRECTORY NOT FOUND.\n  {note}\n\n"
+            "  Refusing to fall back to the full Phase 1 corpus: that CSV is "
+            "the complete\n  evaluated set, including alphas the DSR screen "
+            "rejected. Running on it would\n  silently change the "
+            "certification corpus.\n\n"
+            "  Pass the survivor directory explicitly:\n"
+            "    --alpha-dir \"<project>/alphas/survived/<model>\"\n\n"
+            "  Or, to inspect the unscreened corpus as a DIAGNOSTIC "
+            "(NOT a certification run):\n    --include-all")
     cols = list(ic.columns)
     lower = {c.lower(): c for c in cols}
     keep, missing = [], []
@@ -1469,11 +1559,34 @@ def main():
         trt_ic, tpath = load_phase1_ic(model)
         if ctrl_ic is None or trt_ic is None:
             miss = ctrl_key if ctrl_ic is None else model
-            sys.exit(
-                f"phase1_daily_rank_ic_{miss}.csv not found. Spec line 27 requires "
-                "the Phase 1 series; run phase1_evaluation.py for that model, or "
-                "pass --ic-source recompute to execute the alpha JSONs instead "
-                "(NOTE: recomputing may not reproduce the Phase 1 series exactly).")
+            payload = cpath if ctrl_ic is None else tpath
+            msg = [f"\nphase1_daily_rank_ic_{miss}.csv not found.",
+                   f"  searched: {PHASE1_IC_DIR}, {SCRIPT_DIR}, {ROOT_DIR}, "
+                   f"{os.getcwd()} (and {ROOT_DIR} recursively)"]
+            if isinstance(payload, tuple):
+                keys, near = payload
+                if keys:
+                    msg.append("\n  Phase 1 CSVs that DO exist (model keys):")
+                    msg += [f"    {k}" for k in keys]
+                else:
+                    msg.append("\n  No phase1_daily_rank_ic_*.csv found "
+                               "anywhere on the search path. Check "
+                               "PHASE1_IC_DIR.")
+                if len(near) > 1:
+                    msg.append("\n  AMBIGUOUS near-matches: "
+                               + ", ".join(near)
+                               + "\n  Pass --alpha-dir explicitly; the script "
+                                 "will not guess between them.")
+            msg.append(
+                "\n  The model key is the BASENAME of --alpha-dir. If your "
+                "folder is\n  .../survived/<name> then the CSV must be "
+                "phase1_daily_rank_ic_<name>.csv.\n  Fix by renaming one to "
+                "match the other, or pass --alpha-dir explicitly.")
+            msg.append(
+                "\n  Alternatively pass --ic-source recompute to execute the "
+                "alpha JSONs\n  (NOTE: recomputing may not reproduce the "
+                "Phase 1 series the DSR screen used).")
+            sys.exit("\n".join(msg))
         print(f"   [control] {ctrl_ic.shape[1]} alphas  {cpath}")
         print(f"   [{model}] {trt_ic.shape[1]} alphas  {tpath}")
         # The Phase 1 CSV is the FULL evaluated corpus. The certification
@@ -1556,14 +1669,48 @@ def main():
                 _d, _r2, _, _ = build_differentials_pc(trt_ic, _f, cutoff)
                 s_pc = float(_d.std(ddof=1).median())
                 s_rg = float(diff.std(ddof=1).median())
-                print(f"   BASIS COMPARISON  sigma_d  PC {s_pc:.4f} -> "
-                      f"ridge {s_rg:.4f}  ({100*(1-s_rg/max(s_pc,1e-12)):+.1f}%)"
-                      f"   [required T scales with sigma^2: "
-                      f"x{(s_rg/max(s_pc,1e-12))**2:.2f}]")
+                print(f"   BASIS COMPARISON  per-alpha sigma_d  PC {s_pc:.4f} "
+                      f"-> ridge {s_rg:.4f} "
+                      f"({100*(1-s_rg/max(s_pc,1e-12)):+.1f}%)")
+                # PER-ALPHA sigma is NOT the quantity the pooled claim turns
+                # on. A basis that strips more common variation leaves a
+                # smaller residual in which whatever common component SURVIVES
+                # is a larger fraction - so rho_bar can RISE, N_eff falls, and
+                # sigma_POOLED can get worse even as sigma_d improves. The two
+                # move independently and only the pooled one decides the gate.
+                rows = []
+                for _lab, _dd in (("PC", _d), ("ridge", diff)):
+                    _rb, _np_ = mean_pairwise_corr(_dd)
+                    _ne = effective_n(_dd.shape[1], _rb)
+                    _pl = _dd.mean(axis=1)
+                    _, _, _tp = paired_T_eff(_pl, cutoff, L)
+                    _, _su = sigma_is_upper(_pl, cutoff)
+                    _mde = (K_MDE * _su / np.sqrt(max(_tp, 1e-9))
+                            if np.isfinite(_tp) else np.nan)
+                    rows.append((_lab, float(np.median(_dd.std(ddof=1))), _rb,
+                                 _ne, _su, _tp, _mde))
+                print("   POOLED comparison (this is what the gate uses):")
+                for _lab, _sd, _rb, _ne, _su, _tp, _mde in rows:
+                    print(f"      {_lab:<5} sigma_d {_sd:.4f}  rho_bar {_rb:+.4f}"
+                          f"  N_eff {_ne:5.2f}  sigma_pooled_up {_su:.5f}"
+                          f"  T {_tp:5.1f}  MDE {_mde:.5f}")
+                if len(rows) == 2 and all(np.isfinite(x[6]) for x in rows):
+                    _pcm, _rgm = rows[0][6], rows[1][6]
+                    if _rgm > _pcm:
+                        print(f"      ! RIDGE IS WORSE ON THE POOLED CLAIM "
+                              f"(MDE {_rgm:.5f} vs {_pcm:.5f}, "
+                              f"{100*(_rgm/_pcm-1):+.0f}%). It cut per-alpha"
+                              "\n        sigma but raised rho_bar, and the "
+                              "N_eff loss more than cancelled the gain."
+                              "\n        Set PAIRING_BASIS='pc' if the pooled "
+                              "claim is the primary estimand.")
+                    else:
+                        print(f"      ridge also wins on the pooled MDE "
+                              f"({_rgm:.5f} vs {_pcm:.5f}). Keep ridge.")
                 if s_rg >= s_pc:
-                    print("      ! ridge did NOT beat the PC basis. The control "
-                          "corpus explains no more of the treatment IC than its "
-                          "own leading PCs do. Report and keep PC.")
+                    print("      ! ridge did NOT beat the PC basis even "
+                          "per-alpha. The control corpus explains no more of "
+                          "the treatment IC than its own leading PCs do.")
             basis_done = True
         else:
             print("   ! ridge basis unavailable; falling back to PC")
@@ -1625,10 +1772,27 @@ def main():
         print(f"   Var_obs {rdiag['var_obs']:.5f} = Var_true {rdiag['var_true']:+.5f}"
               f" + Var_noise {rdiag['var_noise']:.5f}"
               f"   ({100*rdiag['noise_share']:.0f}% of observed spread is sampling noise)")
-    if np.isfinite(r_up) and r_up <= MAX_PLAUSIBLE_R:
-        r = r_up
-        print(f"   r noise-corrected {r_pt:.4f} | upper 95% {r_up:.4f} | {n_r} alphas")
+    r_sel = r_pt if R_ESTIMATOR == "point" else r_up
+    if np.isfinite(r_sel) and r_sel <= MAX_PLAUSIBLE_R:
+        r = r_sel
+        print(f"   r noise-corrected POINT {r_pt:.4f} | upper 97.5% {r_up:.4f} "
+              f"| {n_r} alphas")
+        print(f"   using R_ESTIMATOR='{R_ESTIMATOR}' -> r = {r:.4f}")
         print("   FROZEN. Estimated on control data only, before any treatment test.")
+        if np.isfinite(r_up) and r_up > MAX_PLAUSIBLE_R:
+            print(f"   note: the UPPER bound {r_up:.3f} exceeds "
+                  f"{MAX_PLAUSIBLE_R}, so R_ESTIMATOR='upper' would have "
+                  "discarded a usable\n         point estimate and fallen "
+                  "back to the literature constant. Report both.")
+        if r > 0.5:
+            print(f"   ! r = {r:.3f} is LARGE. It says the control arm's own "
+                  "decays are widely\n     dispersed at this window length, "
+                  "so the tolerance for LLM-specific EXCESS\n     decay is "
+                  "correspondingly wide. This is a real measurement (the "
+                  "noise\n     correction has already removed the sampling "
+                  "component), but a wide delta\n     makes certification "
+                  "easier, so state r prominently and report the\n     "
+                  "literature value alongside it as a sensitivity.")
     else:
         r = R_FALLBACK
         if rdiag and rdiag.get("var_true", 1) <= 0:
@@ -1810,6 +1974,17 @@ def main():
           f" -> {'PASSES' if pooled_ok else 'FAILS'} the gate")
     print(f"   equivalence: {p_tost['equivalent']}   "
           f"(MDE/delta = {p_mde/max(p_delta,1e-12):.2f})")
+    # r is the single largest free parameter in the gate. Report the ratio
+    # under each candidate so the reader sees how much the verdict rests on it.
+    print("   SENSITIVITY of the gate to r:")
+    for _lab, _rv in (("control point", r_pt), ("control upper", r_up),
+                      ("literature MP", R_FALLBACK)):
+        if not np.isfinite(_rv):
+            continue
+        _d = _rv * abs(p_is)
+        print(f"      r={_rv:5.3f} ({_lab:<14}) delta {_d:.5f}  "
+              f"MDE/delta {p_mde/max(_d,1e-12):5.2f}"
+              + ("   <- gate PASSES" if p_mde <= _d else ""))
     print(f"   delta* pooled {p_dstar:.5f}  ->  r* = {p_rstar:.3f}"
           f"   against control-calibrated r = {r:.3f}")
     if np.isfinite(p_rstar):
