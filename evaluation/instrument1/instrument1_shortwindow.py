@@ -1,6 +1,14 @@
 """
 INSTRUMENT 1 - SHORT-WINDOW VARIANT
-===================================
+TEST 1: KNOWLEDGE CUTOFF DEGRADATION  (master context section 4)
+================================================================
+
+Mechanism under test: PARAMETRIC memorisation - knowledge encoded in model
+weights - measured as performance decay out of sample on daily cross-sectional
+Rank IC. Step 1 is the Diagnostic Break Search; Step 2 is Stability
+Certification. Section 1 governs both: absence of evidence is not a pass, and
+low power counts AGAINST certification.
+
 Identical to instrument1.py except for five power-directed changes. Each
 reduces required T_eff without weakening the standard; none touches r, which
 remains measured from control data. See CHANGES_shortwindow.md.
@@ -16,7 +24,8 @@ REMOVED after review, and why:
   - GLS pooling. Var(pooled) already contains the pooling gain, so dividing
     the pooled MDE by sqrt(T_eff * N_eff_gls) applied it twice. Beyond the
     bug, minimum-variance weights go negative, making the claim "a long-short
-    book of alphas did not degrade" rather than section 73's panel mean. All
+    book of alphas did not degrade" rather than the panel mean of the paired
+    differentials that section 4 (Step 2, Pooled Variant) specifies. All
     three fallbacks also returned N_eff = n, asserting perfect independence
     precisely where the covariance was least estimable.
   - Pre-registered primary subset. It has NO effect on required T_eff (the
@@ -65,8 +74,10 @@ Pipeline
     1. daily Rank IC for every treatment and control alpha
     2. CtrlMean(t); beta-adjusted differentials (IS-estimated beta)
     3. r estimated leave-one-out from the SPREAD of control decays
-    4. Method A - Magnitude + Proximity, length-matched placebos, Romano-Wolf
-    5. Method B - TOST on the differential, MDE gate, certification frontier
+    4. STEP 1  Diagnostic Break Search - Magnitude + Proximity,
+               length-matched placebos, Romano-Wolf
+    5. STEP 2  Stability Certification - TOST on the differential,
+               MDE gate, certification frontier
     6. reconciliation -> per-alpha verdict; pooled model-level claim
 
 Nothing here chooses a parameter to obtain a verdict. r, sigma, rho_bar and
@@ -127,7 +138,7 @@ DATA_PATH = os.path.join(ROOT_DIR, "data", "daily_ohlcv.parquet")
 OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
 CACHE_DIR = os.path.join(SCRIPT_DIR, ".ic_cache")
 
-# Spec line 27: Phase 1 already exported daily Rank IC per alpha and it is
+# Section 3: Phase 1 already exported daily Rank IC per alpha and it is
 # "not regenerated in Phase 2". Recomputing risks a different IC series than
 # the one the DSR screen ran on. "phase1" reads that CSV; "recompute" executes
 # the alpha JSONs and is an explicit opt-in for when the CSV is absent.
@@ -144,7 +155,8 @@ CUTOFF_UNCERTAINTY_DAYS = 30      # placebo buffer AND Proximity tolerance
 # "close_to_close" is available for comparability with older runs.
 RETURN_CONVENTION = "open_to_open"
 
-IC_MIN_NAMES = 400                # raised from 20; see methodology
+IC_MIN_NAMES = 400                # section 4 / Step 2: drop days with
+                                  # < 400 valid names
 MIN_SIDE_OBS = 30
 TRIM = 0.15                       # Andrews (1993)
 # NON-INFERIORITY, one-sided: k = z(.95) + z(.80) = 2.4865.
@@ -153,19 +165,22 @@ TRIM = 0.15                       # Andrews (1993)
 # DEGRADED, not whether it changed, so the upper tail is not of interest and
 # the second test is not required. Dropping it cuts required T_eff by
 # (2.4865/2.927)^2 = 0.72, i.e. 28% fewer effective observations.
-# Section 7 locks k = 2.927 (two-sided TOST at 80% power). Non-inferiority is
-# available because certification asks whether the alpha DEGRADED rather than
-# whether it changed, but it is a change to the inferential standard and is
-# therefore OFF by default. Turning it on requires justifying it in the
-# methodology, not a config edit.
-# RESOLVED. The master context section 7 locks "MDE gate at k = 2.4865
-# (one-sided non-inferiority)"; the comment above claiming section 7 locks
-# 2.927 contradicted it. Section 7 wins, and the substantive argument runs
-# the same way: TOST's upper test fails an alpha for IMPROVING out of sample,
-# but contamination predicts DEGRADATION, so the upper tail rejects on an
-# event the hypothesis does not predict. That is a false negative by
-# construction, not conservatism. Dropping it cuts required T_eff by
-# (2.4865/2.927)^2 = 0.72.
+# WHICH k IS AUTHORITATIVE. Section 4's MDE gate is written
+#     MDE = 2.4865 * sigma_IC / sqrt(T_eff),
+# and 2.4865 = z(.95) + z(.80) is the ONE-SIDED non-inferiority constant, so
+# the default below matches the plan AS WRITTEN. Section 7's locked list fixes
+# the proportional margin delta = r * IS IC; it does not name k.
+#
+# ---- OPEN, FLAG RATHER THAN ASSUME (section 8) ----------------------------
+# Section 4 titles Step 2 "Stability Certification (TOST)" but states the MDE
+# gate with the one-sided constant. TOST is two-sided and needs k = 2.927, so
+# the heading and the formula do not currently agree. Non-inferiority is the
+# reading that matches the stated formula, and the substantive argument
+# supports it: TOST's upper test fails an alpha for IMPROVING out of sample,
+# whereas contamination predicts DEGRADATION, so the upper tail rejects on an
+# event the hypothesis does not predict. Set TEST_MODE = "tost" for the
+# two-sided standard; it costs (2.927/2.4865)^2 = 1.39x the effective sample.
+# Resolve this in the methodology, not by editing the config.
 TEST_MODE = "noninferiority"      # "noninferiority" (locked) | "tost"
 K_MDE = 2.4865 if TEST_MODE == "noninferiority" else 2.927
 
@@ -220,8 +235,9 @@ ALPHA_LEVEL = 0.05
 # "asymmetric" : full available pre-history + L days after. Better power, but
 #                the post-date share is tiny at every date, sup-Wald is
 #                trim-blocked, and PROXIMITY IS NOT COMPUTED (Magnitude only).
-# Spec line 55 specifies symmetric placebos and line 54 requires both
-# statistics, so symmetric is the default.
+# Section 4 (Test 1, Step 1) specifies length-matched SYMMETRIC placebo
+# windows and requires BOTH statistics - Magnitude and Proximity - so
+# symmetric is the default.
 WINDOW_MODE = "symmetric"
 
 PLACEBO_START = "2016-01-01"
@@ -232,7 +248,7 @@ RNG_SEED = 0
 
 # Below this T_eff the standard normal critical value is unreliable for HAC
 # inference (finite-sample size distortion), so critical values come from a
-# moving-block bootstrap instead. Spec line 66.
+# moving-block bootstrap instead. Section 4 / Test 1 / Step 2, Execution.
 FIXED_B_THRESHOLD = 100
 BOOT_BLOCKS = 999
 
@@ -342,7 +358,7 @@ def rank_ic_series(signal, fwd, min_names=IC_MIN_NAMES):
 
 
 def load_phase1_ic(model_key):
-    """Read the Rank IC panel Phase 1 already exported. Spec line 27."""
+    """Read the Rank IC panel Phase 1 already exported (section 3)."""
     names = [f"phase1_daily_rank_ic_{model_key}.csv"]
     roots = [PHASE1_IC_DIR, SCRIPT_DIR, ROOT_DIR, os.getcwd()]
     cands = [os.path.join(r, n) for r in roots for n in names]
@@ -771,7 +787,8 @@ def supwald(series, pos, L, mode=WINDOW_MODE, trim=TRIM,
 
 def sigma_is_upper(series, cutoff, conf=0.95):
     """
-    IS-only sigma with an upper confidence bound (spec line 67).
+    IS-only sigma with an upper confidence bound.
+    Section 4 / Test 1 / Step 2, MDE gate.
 
     Full-sample sigma lets the gate see the data it is gating. The upper bound
     uses the chi-square limit for a standard deviation on nu = T_eff - 1
@@ -793,7 +810,8 @@ def block_bootstrap_cv(pre, post, conf=0.95, n_boot=BOOT_BLOCKS, seed=RNG_SEED):
     Critical values for the studentised shift from a MOVING-BLOCK BOOTSTRAP.
 
     Below T_eff ~ 100 the standard normal is unreliable for HAC inference
-    (spec line 66). Each segment is centred on its own mean, imposing the null
+    (section 4 / Test 1 / Step 2, Execution). Each segment is centred on its
+    own mean, imposing the null
     of zero shift, then resampled in blocks of length l = ceil(T^(1/3)) so the
     within-block dependence is preserved.
 
@@ -939,7 +957,7 @@ def frontier_ic(sigma, r, T_eff, N_eff=1.0, k=K_MDE):
 
 
 # =========================================================
-# 3. DIFFERENTIALS AND MARGIN
+# 3. PAIRED DIFFERENTIALS d_i(t) AND THE MARGIN delta = r x IS Rank IC
 # =========================================================
 
 def delta_star(diff, se, cv_hi, cv_lo=None, mode=TEST_MODE):
@@ -1130,7 +1148,8 @@ def loo_control_differentials_ridge(ctrl_ic, cutoff,
     """
     Leave-one-out ridge differencing through the IDENTICAL pipeline.
 
-    Mandatory for the same reason as the PC version: section 4 makes the
+    Mandatory for the same reason as the PC version: section 4 (Step 1,
+    Control calibration) makes the
     control certification rate the pipeline's false-positive rate, so any
     asymmetry between the arms makes that sentence false.
     """
@@ -1251,8 +1270,9 @@ def loo_control_differentials_pc(ctrl_ic, cutoff, n_pcs=N_PCS):
 
     Running the arms through different constructions makes the control sigma
     larger than the treatment sigma, which inflates control power-insufficiency
-    and DEFLATES the measured false-positive rate. Since spec line 60 makes the
-    control certification rate the pipeline's FPR, an asymmetric pipeline makes
+    and DEFLATES the measured false-positive rate. Since section 4 (Step 1,
+    Control calibration) makes the control certification rate the pipeline's
+    FPR, an asymmetric pipeline makes
     that sentence false in the direction that flatters the treatment arm.
     """
     out, r2s, paired = {}, {}, {}
@@ -1295,7 +1315,7 @@ def loo_control_differentials(ctrl_ic, cutoff):
     return pd.DataFrame(out)
 
 
-def estimate_r(loo_diff, ctrl_ic, cutoff, L, seed=RNG_SEED):
+def calibrate_margin_r(loo_diff, ctrl_ic, cutoff, L, seed=RNG_SEED):
     """
     r = SPREAD of the leave-one-out control decay distribution, NOISE-CORRECTED.
 
@@ -1390,7 +1410,8 @@ def estimate_r(loo_diff, ctrl_ic, cutoff, L, seed=RNG_SEED):
 
 
 # =========================================================
-# 4. METHOD A - PLACEBOS AND ROMANO-WOLF
+# 4. TEST 1 / STEP 1 - DIAGNOSTIC BREAK SEARCH
+#    Magnitude, Proximity, placebo null, Romano-Wolf
 # =========================================================
 
 def placebo_dates(index, cutoff, L, mode=WINDOW_MODE):
@@ -1405,7 +1426,7 @@ def placebo_dates(index, cutoff, L, mode=WINDOW_MODE):
     return [d for d in cands if not (lo <= d <= hi)]
 
 
-def method_a(panel_diff, cutoff, L, label):
+def step1_break_search(panel_diff, cutoff, L, label):
     """Magnitude and Proximity at the cutoff, with the placebo null."""
     idx = panel_diff.dropna(how="all").index
     cands = placebo_dates(idx, cutoff, L)
@@ -1423,15 +1444,16 @@ def method_a(panel_diff, cutoff, L, label):
         s = panel_diff[c].dropna()
         pc = _pos_ok(s, cutoff)
         if pc is None:
-            real[c] = dict(magnitude=np.nan, supwald=np.nan,
-                           break_offset=np.nan, proximity=np.nan)
+            real[c] = dict(step1_magnitude=np.nan, step1_supwald=np.nan,
+                           step1_break_offset=np.nan, step1_proximity=np.nan)
             pl_mag[c] = pd.Series(np.nan, index=cands)
             pl_prox[c] = pd.Series(np.nan, index=cands)
             continue
         m = magnitude_wald(s, pc, L)
         sw, off = supwald(s, pc, L)
-        real[c] = dict(magnitude=m, supwald=sw, break_offset=off,
-                       proximity=abs(off) if np.isfinite(off) else np.nan)
+        real[c] = dict(step1_magnitude=m, step1_supwald=sw,
+                       step1_break_offset=off,
+                       step1_proximity=abs(off) if np.isfinite(off) else np.nan)
         mm, pp = [], []
         for d in cands:
             pd_pos = _pos_ok(s, d)
@@ -1452,13 +1474,14 @@ def method_a(panel_diff, cutoff, L, label):
     # per-alpha permutation p-values
     for c in real.index:
         m = pl_mag[c].dropna()
-        real.loc[c, "p_magnitude"] = (
-            (1 + int((m.abs() >= abs(real.loc[c, "magnitude"])).sum())) / (1 + len(m))
-            if np.isfinite(real.loc[c, "magnitude"]) and len(m) else np.nan)
+        real.loc[c, "step1_p_magnitude"] = (
+            (1 + int((m.abs() >= abs(real.loc[c, "step1_magnitude"])).sum()))
+            / (1 + len(m))
+            if np.isfinite(real.loc[c, "step1_magnitude"]) and len(m) else np.nan)
         p = pl_prox[c].dropna()
-        real.loc[c, "p_proximity"] = (
-            (1 + int((p <= real.loc[c, "proximity"]).sum())) / (1 + len(p))
-            if np.isfinite(real.loc[c, "proximity"]) and len(p) else np.nan)
+        real.loc[c, "step1_p_proximity"] = (
+            (1 + int((p <= real.loc[c, "step1_proximity"]).sum())) / (1 + len(p))
+            if np.isfinite(real.loc[c, "step1_proximity"]) and len(p) else np.nan)
 
     # Romano-Wolf stepdown on Magnitude, using the placebo dates as the joint
     # null so placebo-calibrated size is not lost at corpus level.
@@ -1470,7 +1493,8 @@ def method_a(panel_diff, cutoff, L, label):
     # it had no effect on required T_eff and its selection rule ranked the
     # family by IS Rank IC, which is delta / r - so the widest-margin alphas
     # were the only ones getting FWER protection.
-    real["p_magnitude_rw"] = romano_wolf(real["magnitude"].abs(), pl_mag.abs())
+    real["step1_p_magnitude_rw"] = romano_wolf(real["step1_magnitude"].abs(),
+                                              pl_mag.abs())
 
     span = (cands[-1] - cands[0]).days / 365.25 * 252 if len(cands) > 1 else 0
     width = 2 * L if WINDOW_MODE == "symmetric" else L
@@ -1508,12 +1532,12 @@ def romano_wolf(stats, null_panel):
 
 
 # =========================================================
-# 5. MAIN
+# 5. RECONCILIATION AND MAIN
 # =========================================================
 
-def verdict(row, equiv, power_ok):
+def reconcile(row, equiv, power_ok):
     """
-    Reconciliation table from the spec.
+    Reconciliation. Section 4 / Test 1 / Step 2.
 
     A non-finite break p-value is a HARD FAIL, not a pass. Under section 1
     absence of evidence for a failure mode is not a pass and ambiguity counts
@@ -1523,7 +1547,7 @@ def verdict(row, equiv, power_ok):
     """
     if not power_ok:
         return "NOT CERTIFIED (power-insufficient)"
-    p_brk = row.get("p_magnitude_rw", np.nan)
+    p_brk = row.get("step1_p_magnitude_rw", np.nan)
     if not np.isfinite(p_brk):
         return "NOT CERTIFIED (break test uncomputable)"
     brk = bool(p_brk < ALPHA_LEVEL)
@@ -1565,7 +1589,8 @@ def main():
     model = os.path.basename(os.path.normpath(a.alpha_dir))
 
     print("\n" + "=" * 62)
-    print("INSTRUMENT 1 - PARAMETRIC LOOK-AHEAD BIAS")
+    print("INSTRUMENT 1  |  TEST 1: KNOWLEDGE CUTOFF DEGRADATION")
+    print("mechanism: parametric memorisation (knowledge in model weights)")
     print("=" * 62)
     print(f"model        : {model}")
     print(f"cutoff       : {cutoff.date()}  (+/- {CUTOFF_UNCERTAINTY_DAYS}d)")
@@ -1789,8 +1814,9 @@ def main():
             print("      ! arms are materially asymmetric; the control "
                   "certification rate is NOT a valid FPR for the treatment arm.")
 
-    print("\n[3/6] estimating r from control decay SPREAD (leave-one-out)")
-    r_pt, r_up, n_r, rdiag = estimate_r(loo, ctrl_ic, cutoff, L)
+    print("\n[3/6] calibrating the margin delta = r x IS Rank IC"
+          "\n      (r from the SPREAD of leave-one-out control decays)")
+    r_pt, r_up, n_r, rdiag = calibrate_margin_r(loo, ctrl_ic, cutoff, L)
     if rdiag:
         print(f"   Var_obs {rdiag['var_obs']:.5f} = Var_true {rdiag['var_true']:+.5f}"
               f" + Var_noise {rdiag['var_noise']:.5f}"
@@ -1869,37 +1895,42 @@ def main():
                   "(the survivor control\n      estimate). It is not "
                   "re-estimated per corpus, so this isolates the effect of\n"
                   "      screening the TREATMENT arm only.")
-            feas.to_csv(os.path.join(OUT_DIR, f"corpus_feasibility_{model}.csv"),
-                        index=False)
+            feas.to_csv(os.path.join(
+                OUT_DIR, f"test1_corpus_feasibility_{model}.csv"), index=False)
 
-    print("\n[4/6] Method A - break tests with length-matched placebos")
-    res, pl_mag, pl_prox, n_indep = method_a(diff, cutoff, L, model)
-    loo_res, _, _, _ = method_a(loo, cutoff, L, "control FPR")
-    fpr = float((loo_res["p_magnitude"] < ALPHA_LEVEL).mean())
-    print(f"   control false-positive rate at alpha={ALPHA_LEVEL}: {fpr:.3f}")
+    print("\n[4/6] STEP 1 - Diagnostic Break Search "
+          "(Magnitude + Proximity, length-matched placebos)")
+    res, pl_mag, pl_prox, n_indep = step1_break_search(diff, cutoff, L, model)
+    loo_res, _, _, _ = step1_break_search(loo, cutoff, L,
+                                          "control calibration (LOO)")
+    fpr = float((loo_res["step1_p_magnitude"] < ALPHA_LEVEL).mean())
+    print(f"   control calibration - empirical false-positive rate at "
+          f"alpha={ALPHA_LEVEL}: {fpr:.3f}")
 
     # TREATMENT ARM SUMMARY. Section 4's reconciliation table needs this to
     # exist as a printed result, not just as columns inside the per-alpha CSV
     # - without it the reader cannot tell "these alphas decay" apart from
     # "these alphas decay AT THIS MODEL'S CUTOFF", and only the second is the
     # mechanism this instrument is testing.
-    n_brk = int((res["p_magnitude_rw"] < ALPHA_LEVEL).sum())
-    n_ok = int(res["p_magnitude_rw"].notna().sum())
+    n_brk = int((res["step1_p_magnitude_rw"] < ALPHA_LEVEL).sum())
+    n_ok = int(res["step1_p_magnitude_rw"].notna().sum())
     print(f"   [{model}] break-at-cutoff (Romano-Wolf, alpha={ALPHA_LEVEL}): "
           f"{n_brk} of {n_ok} alphas")
     if n_ok:
-        print(f"      median p_magnitude_rw {res['p_magnitude_rw'].median():.3f}"
-              f"  |  median |break_offset| {res['break_offset'].abs().median():.1f} days")
+        print(f"      median Magnitude p (Romano-Wolf) "
+              f"{res['step1_p_magnitude_rw'].median():.3f}  |  median "
+              f"|break offset| {res['step1_break_offset'].abs().median():.1f} days")
     if n_brk > 0:
-        _brk_ids = res.index[res["p_magnitude_rw"] < ALPHA_LEVEL].tolist()
+        _brk_ids = res.index[res["step1_p_magnitude_rw"] < ALPHA_LEVEL].tolist()
         print(f"      broken: {', '.join(_brk_ids)}")
         print("      A break at the cutoff, if paired with equivalence FAILING "
-              "in Method B, is\n      the reconciliation table's CONTAMINATION "
+              "in STEP 2, is\n      the reconciliation table's CONTAMINATION "
               "cell - the strongest finding this\n      instrument can "
               "produce. Check these alphas individually before writing up "
               "the\n      pooled verdict alone.")
 
-    print("\n[5/6] Method B - TOST, MDE gate, frontier")
+    print("\n[5/6] STEP 2 - Stability Certification "
+          "(TOST, MDE gate, frontier)")
     rho_bar, npairs = mean_pairwise_corr(diff)
     N_eff = effective_n(diff.shape[1], rho_bar)
     print(f"   rho_bar across differentials {rho_bar:+.4f} ({npairs} pairs)")
@@ -1920,8 +1951,8 @@ def main():
         power_ok = bool(np.isfinite(mde) and np.isfinite(delta) and mde <= delta)
         t = tost(sd, cutoff, L, delta)
         rows.append(dict(
-            alpha_id=c, is_rank_ic=is_ic, beta=betas.get(c, np.nan),
-            pair_r2=float(r2s.get(c, np.nan)), paired=bool(paired.get(c, False)),
+            alpha_id=c, is_rank_ic=is_ic, beta_i=betas.get(c, np.nan),
+            pairing_r2=float(r2s.get(c, np.nan)), paired=bool(paired.get(c, False)),
             sigma_is=sig_hat, sigma_is_upper=sig_up,
             T_nominal=int(oos.notna().sum()),
             T_eff_is=T_eff_pre, T_eff_oos=T_eff_oos, T_eff=T_eff,
@@ -1932,14 +1963,15 @@ def main():
             delta_star=delta_star(t["diff"], t["se"], t["cv"], t["cv_lo"]),
             r_star=(delta_star(t["diff"], t["se"], t["cv"], t["cv_lo"])
                     / abs(is_ic) if abs(is_ic) > MIN_IS_IC_FOR_R else np.nan),
-            is_ic_t=float(sdiag["t_stat"].get(c, np.nan)),
-            flipped=bool(signs.get(c, 1.0) < 0),
-            magnitude=res.loc[c, "magnitude"], p_magnitude=res.loc[c, "p_magnitude"],
-            p_magnitude_rw=res.loc[c, "p_magnitude_rw"],
-            break_offset=res.loc[c, "break_offset"],
-            p_proximity=res.loc[c, "p_proximity"],
+            is_rank_ic_t=float(sdiag["t_stat"].get(c, np.nan)),
+            sign_flipped=bool(signs.get(c, 1.0) < 0),
+            step1_magnitude=res.loc[c, "step1_magnitude"],
+            step1_p_magnitude=res.loc[c, "step1_p_magnitude"],
+            step1_p_magnitude_rw=res.loc[c, "step1_p_magnitude_rw"],
+            step1_break_offset=res.loc[c, "step1_break_offset"],
+            step1_p_proximity=res.loc[c, "step1_p_proximity"],
             frontier_ic_min=frontier_ic(sig_up, r, T_eff),
-            verdict=verdict(res.loc[c], t["equivalent"], power_ok)))
+            verdict=reconcile(res.loc[c], t["equivalent"], power_ok)))
     out = pd.DataFrame(rows).set_index("alpha_id")
     nb = int((out["cv_source"] == "block-bootstrap").sum())
     if nb:
@@ -1948,9 +1980,10 @@ def main():
               f"{out.loc[out['cv_source']=='block-bootstrap','tost_cv'].median():.3f} "
               "vs 1.645 normal")
 
-    # FIX E - spec line 60: the control arm's CERTIFICATION rate is the
-    # pipeline's false-positive rate, so Method B must run on controls too.
-    # Method A alone only calibrates the rejection half.
+    # Section 4 (Step 1, Control calibration): the control arm's
+    # CERTIFICATION rate is the
+    # pipeline's false-positive rate, so STEP 2 must run on controls too.
+    # STEP 1 alone only calibrates the rejection half.
     ctrl_rows = []
     for c in loo.columns:
         sd = loo[c]
@@ -1970,7 +2003,7 @@ def main():
                               r_star=(delta_star(t["diff"], t["se"], t["cv"],
                                                  t["cv_lo"]) / abs(is_ic)
                                       if abs(is_ic) > MIN_IS_IC_FOR_R else np.nan),
-                              verdict=verdict(loo_res.loc[c], t["equivalent"], pok)))
+                              verdict=reconcile(loo_res.loc[c], t["equivalent"], pok)))
     ctrl_out = pd.DataFrame(ctrl_rows).set_index("alpha_id") if ctrl_rows \
         else pd.DataFrame(columns=["verdict"])
     ctrl_cert = (float((ctrl_out["verdict"] == "CERTIFIED").mean())
@@ -1991,7 +2024,8 @@ def main():
           f"  over {len(ctrl_out)} controls")
 
     hdr = ("PRIMARY ESTIMAND" if PRIMARY_ESTIMAND == "pooled" else "fallback")
-    print(f"\n[6/6] POOLED model-level claim - {hdr} (equal-weighted panel mean)")
+    print(f"\n[6/6] STEP 2 POOLED VARIANT - model-level claim, {hdr}"
+          "\n      (equal-weighted panel mean of the paired differentials)")
     if PRIMARY_ESTIMAND == "pooled":
         print("   Section 4 already anticipates per-alpha power failure below "
               "~15 months OOS.\n   Pooling is a choice of ESTIMAND that is "
@@ -2016,20 +2050,21 @@ def main():
                          p_tost["cv_lo"])
     p_rstar = p_dstar / abs(p_is) if abs(p_is) > MIN_IS_IC_FOR_R else np.nan
 
-    # METHOD A ON THE POOLED SERIES. Previously the primary estimand had no
-    # break test at all: [6/6] ran Method B only, so section 4's
+    # STEP 1 ON THE POOLED SERIES. Previously the primary estimand had no
+    # break test at all: [6/6] ran STEP 2 only, so section 4's
     # reconciliation table - which decides "decayed" vs "contaminated" -
     # could not be applied to the number actually being certified. Wrapped as
-    # a single-column panel so method_a's placebo/Romano-Wolf machinery runs
-    # unchanged (family size 1 degrades gracefully: the "stepdown" null is
+    # a single-column panel so step1_break_search's placebo/Romano-Wolf
+    # machinery runs unchanged (family size 1 degrades gracefully: the
+    # "stepdown" null is
     # just this series' own placebo distribution).
-    p_res, _, _, p_nindep = method_a(pd.DataFrame({model: pooled}),
+    p_res, _, _, p_nindep = step1_break_search(pd.DataFrame({model: pooled}),
                                      cutoff, L, f"{model} POOLED")
     p_row = p_res.loc[model]
-    p_brk = bool(p_row["p_magnitude_rw"] < ALPHA_LEVEL) \
-        if np.isfinite(p_row["p_magnitude_rw"]) else None
-    print(f"   Method A (pooled): p_magnitude {p_row['p_magnitude']:.3f}  "
-          f"break_offset {p_row['break_offset']:+.0f}d  "
+    p_brk = bool(p_row["step1_p_magnitude_rw"] < ALPHA_LEVEL) \
+        if np.isfinite(p_row["step1_p_magnitude_rw"]) else None
+    print(f"   Step 1 (pooled): Magnitude p {p_row['step1_p_magnitude']:.3f}  "
+          f"break offset {p_row['step1_break_offset']:+.0f}d  "
           + (f"-> {'BREAK' if p_brk else 'no break'} at cutoff (alpha={ALPHA_LEVEL})"
              if p_brk is not None else "-> break test uncomputable"))
     p_sig = float(pooled.loc[pooled.index < cutoff].std(ddof=1))
@@ -2070,13 +2105,13 @@ def main():
     print(f"   delta* pooled {p_dstar:.5f}  ->  r* = {p_rstar:.3f}"
           f"   against control-calibrated r = {r:.3f}")
 
-    # FULL RECONCILIATION, using the SAME verdict() function applied per
+    # FULL RECONCILIATION, using the SAME reconcile() function applied per
     # alpha, so the primary estimand and the descriptive per-alpha rows are
     # judged by identical rules rather than by two pieces of logic that can
     # silently drift apart (which is what happened before this fix: the
     # pooled block certified/failed on r* alone, with no break test and no
-    # use of the gate-then-equivalence ORDER that verdict() enforces).
-    pooled_verdict = verdict(p_row, p_tost["equivalent"], pooled_ok)
+    # use of the gate-then-equivalence ORDER that reconcile() enforces).
+    pooled_verdict = reconcile(p_row, p_tost["equivalent"], pooled_ok)
     print(f"   -> POOLED VERDICT: {pooled_verdict}")
     if pooled_verdict == "NOT CERTIFIED (power-insufficient)":
         print("      MDE > delta: the gate binds regardless of delta* or the "
@@ -2088,16 +2123,16 @@ def main():
               "break test could not\n      be computed on the pooled series "
               "(insufficient placebo coverage), so the\n      "
               "reconciliation table has no break-test cell to read and the "
-              "claim cannot be\n      certified on Method B alone.")
+              "claim cannot be\n      certified on STEP 2 alone.")
     elif pooled_verdict == "NOT CERTIFIED (break at cutoff)":
-        print("      Method A found a break AT THE CUTOFF and Method B could "
+        print("      Step 1 found a break AT THE CUTOFF and Step 2 could "
               "not establish\n      equivalence. This is the reconciliation "
               "table's CONTAMINATION cell -\n      the strongest finding "
               "this instrument produces. Cross-check against which\n      "
               "individual alphas broke (printed at [4/6]).")
     elif pooled_verdict == "NOT CERTIFIED (break dominates)":
-        print(f"      Method A found a break at the cutoff even though "
-              f"Method B's equivalence\n      test passed at delta = "
+        print(f"      Step 1 found a break at the cutoff even though "
+              f"Step 2's equivalence\n      test passed at delta = "
               f"{p_delta:.5f}. Per the reconciliation table the break "
               "evidence\n      dominates: delta was wider than the break, "
               "not narrower than the decay.")
@@ -2133,12 +2168,25 @@ def main():
               "excess, not a resolution limit.")
 
     # ---- report ----
-    out.to_csv(os.path.join(OUT_DIR, f"instrument1_{model}.csv"))
-    diff.to_csv(os.path.join(OUT_DIR, f"differentials_{model}.csv"))
-    pl_mag.to_csv(os.path.join(OUT_DIR, f"placebo_magnitude_{model}.csv"))
-    loo_res.to_csv(os.path.join(OUT_DIR, "control_fpr_methodA.csv"))
+    # COLUMN MAP -> master context section 4, Test 1.
+    #   is_rank_ic .......... IS mean Rank IC (the scale delta is built on)
+    #   beta_i, pairing_r2 .. d_i(t) = IC_i(t) - beta_i * CtrlMean(t), IS-only
+    #   step1_* ............. Step 1, Diagnostic Break Search
+    #                         (Magnitude, Proximity, placebo p, Romano-Wolf p)
+    #   delta, mde, T_eff ... Step 2, margin and MDE gate
+    #   tost_*, equivalent .. Step 2, Stability Certification
+    #   delta_star, r_star .. smallest certifying margin, as a multiple of
+    #                         |IS Rank IC|, directly comparable to r
+    #   verdict ............. Reconciliation -> section 4 SYNTHESIS
+    out.to_csv(os.path.join(OUT_DIR, f"test1_per_alpha_{model}.csv"))
+    diff.to_csv(os.path.join(OUT_DIR, f"test1_differentials_{model}.csv"))
+    pl_mag.to_csv(os.path.join(
+        OUT_DIR, f"test1_step1_placebo_magnitude_{model}.csv"))
+    loo_res.to_csv(os.path.join(
+        OUT_DIR, "test1_step1_control_calibration.csv"))
     if len(ctrl_out):
-        ctrl_out.to_csv(os.path.join(OUT_DIR, "control_fpr_full.csv"))
+        ctrl_out.to_csv(os.path.join(
+            OUT_DIR, "test1_control_certification_rate.csv"))
 
     print("\n" + "=" * 62)
     print("VERDICTS" + ("   [PRIMARY = POOLED MODEL-LEVEL CLAIM]"
@@ -2151,15 +2199,15 @@ def main():
               f"T_eff={p_Teff:.0f}): {pooled_verdict}")
         print(f"      delta {p_delta:.5f} | MDE {p_mde:.5f} | "
               f"delta* {p_dstar:.5f} | r* {p_rstar:.3f} vs r {r:.3f} | "
-              + (f"break p={p_row['p_magnitude_rw']:.3f}"
-                 if np.isfinite(p_row['p_magnitude_rw']) else "break uncomputable"))
+              + (f"break p={p_row['step1_p_magnitude_rw']:.3f}"
+                 if np.isfinite(p_row['step1_p_magnitude_rw']) else "break uncomputable"))
         print("   per-alpha results below are DESCRIPTIVE, not the claim:")
     for v, n in out["verdict"].value_counts().items():
         print(f"   {n:3d}  {v}")
     cert = out.index[out["verdict"] == "CERTIFIED"].tolist()
     print(f"\n   certified: {len(cert)} of {len(out)}"
           + (f"  -> {', '.join(cert[:8])}" if cert else ""))
-    print(f"   control Method-A rejection rate : {fpr:.3f}")
+    print(f"   control STEP 1 rejection rate  : {fpr:.3f}")
     print(f"   control CERTIFICATION rate     : {ctrl_cert:.3f}"
           "   <- empirical FPR of the WHOLE pipeline")
     print(f"   power-insufficient: {int((~out['power_ok']).sum())} of {len(out)}")
