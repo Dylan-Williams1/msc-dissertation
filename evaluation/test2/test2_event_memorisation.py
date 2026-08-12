@@ -1,5 +1,5 @@
 """
-Phase 2 - Test 2: Historical Event Memorisation.
+Test 2: Historical Event Memorisation.
 
     Step 1  Absolute Anomaly Screen        (unpaired, dual universal placebo)
     Step 2  Control Differential Check     (paired, leave-that-window-out beta)
@@ -18,8 +18,8 @@ Inputs
 
 Outputs
     test2_events.csv           declustered episodes, salience arms, covariates
-    test2_event_results.csv    one row per (alpha, event)
-    test2_alpha_verdicts.csv   one row per alpha
+    test2_event_results.csv    one row per (alpha, event), full statistics
+    test2_alpha_verdicts.csv   one row per alpha, flag counts and verdict
 
 Language restriction: alphas are credible / temporally robust / non-contaminated,
 never profitable, deployable, tradable or net-positive. All figures GROSS.
@@ -725,7 +725,16 @@ class Test2:
 
 def synthesise(event_results):
     """
-    One row per alpha.
+    One row per alpha. Every column is a count of high-salience events, so all
+    of them are read against `events_tested`.
+
+        verdict                      PASS / FAIL / INDETERMINATE
+        events_tested                high-salience events with a usable statistic
+        events_failed                events failing the Scenario A or B rule
+        step1_anomaly_flags          raw IC above the control placebo 95th pct
+        step2_differential_flags     paired differential significantly positive
+        step3_salience_gap_flags     salience gap significantly positive
+        binding_failure_mode         which rule actually bound, over failed events
 
     A Test 2 PASS is the absence of affirmative evidence of event-level
     memorisation. It is not certification, which is a joint claim across Gate 0
@@ -739,18 +748,13 @@ def synthesise(event_results):
 
         out.append(dict(
             alpha_id=alpha_id,
-            test2_verdict=("INDETERMINATE" if len(ev) == 0 else
-                           "FAIL_EVENT_MEMORISATION_FLAGGED" if n_fail else
-                           "PASS_NO_EVENT_MEMORISATION_DETECTED"),
-            n_events_evaluable=len(ev),
-            n_events_failed=n_fail,
-            n_scenario_a=int((ev["scenario"] == "A").sum()),
-            n_scenario_b=int((ev["scenario"] == "B").sum()),
-            binding_failure_modes="|".join(sorted(set(modes))) if n_fail else "none",
-            n_step1_anomalies=int(ev["step1_anomaly"].sum()),
-            n_step1_disagreements=int(ev["step1_variants_disagree"].sum()),
-            n_step2_sig_positive=int(ev["step2_sig_positive"].sum()),
-            n_step3_sig_positive=int(ev["step3_sig_positive"].sum()),
+            verdict=("INDETERMINATE" if len(ev) == 0 else "FAIL" if n_fail else "PASS"),
+            events_tested=len(ev),
+            events_failed=n_fail,
+            step1_anomaly_flags=int(ev["step1_anomaly"].sum()),
+            step2_differential_flags=int(ev["step2_sig_positive"].sum()),
+            step3_salience_gap_flags=int(ev["step3_sig_positive"].sum()),
+            binding_failure_mode=", ".join(sorted(set(modes))) if n_fail else "none",
         ))
     return pd.DataFrame(out)
 
@@ -806,21 +810,45 @@ def main(argv=None):
     if engine.high.empty:
         raise ValueError("No usable high-salience events; Test 2 cannot run.")
 
+    n_high = len(engine.high)
+    print("=" * 78)
     print("TEST 2: HISTORICAL EVENT MEMORISATION")
-    print(f"Subjects         : {len(subjects)} LLM alphas"
-          f"{'' if args.all_alphas or not llm_survivors else ' (Phase 1 survivors)'}")
-    print(f"Control baseline : {ctrl_panel.shape[1]} alphas (CtrlMean + Step 1 placebo only)")
-    print(f"Events           : {n_jumps} BBDS jumps -> {len(episodes)} episodes -> "
-          f"{len(engine.high)} high-salience, {len(engine.low)} low-salience")
-    print(f"Placebo windows  : {int(engine.placebo_allowed.sum())} of {engine.n_windows}"
-          f"   Calendar: {len(calendar)} sessions ({cal_src})")
+    print("=" * 78)
 
+    # ---- 1. events -------------------------------------------------------
+    print(f"\nEVENTS\n  {n_jumps} BBDS jumps in {ANCHOR_START[:4]}-{ANCHOR_END[:4]}"
+          f"  ->  {len(episodes)} shock episodes after declustering")
+    print(f"  {n_high} high-salience (treatment), {len(engine.low)} low-salience "
+          f"(matching pool), {len(episodes) - n_high - len(engine.low)} middle quartiles unused")
     if last_jump < pd.Timestamp(ANCHOR_END) - pd.Timedelta(days=365):
-        print(f"NOTE             : BBDS coding stops {last_jump.date()}; Test 2 is silent "
-              f"on events after that date.")
-    print()
+        print(f"  BBDS coding stops {last_jump.date()}; Test 2 is silent on anything after that date.")
 
-    # ---- run -------------------------------------------------------------
+    # matches = low-salience events inside the caliper, which is what routes an
+    # event to Scenario A (rely on the control differential) or B (also test the
+    # salience gap against the matched composite).
+    print(f"\n  {'event date':<13}{'return':>8}{'consensus':>11}{'matches':>9}   "
+          f"{WINDOW}-day window")
+    for i, (_, e) in enumerate(engine.high.sort_values("date").iterrows()):
+        if engine.matching is None:
+            n_m = "-"
+        else:
+            row = engine.matching["distance"][engine.matching["high_ids"].index(e["event_id"])]
+            n_m = int(np.sum(np.isfinite(row) & (row <= MAHALANOBIS_CALIPER)))
+        print(f"  {str(e['date'].date()):<13}{e['return']:>+8.2%}"
+              f"{e['narrative_consensus']:>11.2f}{str(n_m):>9}   "
+              f"{pd.Timestamp(e['window_first_date']).date()} to "
+              f"{pd.Timestamp(e['window_last_date']).date()}")
+
+    # ---- 2. alphas -------------------------------------------------------
+    print(f"\nALPHAS\n  {len(subjects)} LLM alphas"
+          f"{'' if args.all_alphas or not llm_survivors else ' (Phase 1 survivors)'}"
+          f" against a control baseline of {ctrl_panel.shape[1]} alphas, "
+          f"{int(engine.placebo_allowed.sum())} placebo windows.")
+    print(f"  Counts are high-salience events flagged, out of {n_high}. An alpha fails only")
+    print("  where the Scenario A or B rule binds, so flags alone are not failures.\n")
+    print(f"  {'alpha':<30}{'Step 1':>9}{'Step 2':>9}{'Step 3':>9}   verdict")
+    print(f"  {'':<30}{'anomaly':>9}{'differ.':>9}{'sal. gap':>9}")
+
     rng = np.random.default_rng(PERMUTATION_SEED)
     frames = []
     for aid in subjects:
@@ -829,9 +857,10 @@ def main(argv=None):
             continue
         frames.append(res)
         v = "FAIL" if (res["event_verdict"] == "FAIL").any() else "PASS"
-        print(f"  {aid:<28} S1:{int(res['step1_anomaly'].sum()):>2}  "
-              f"S2:{int(res['step2_sig_positive'].sum()):>2}  "
-              f"S3:{int(res['step3_sig_positive'].sum()):>2}   {v}")
+        print(f"  {aid:<30}"
+              f"{f'{int(res.step1_anomaly.sum())}/{n_high}':>9}"
+              f"{f'{int(res.step2_sig_positive.sum())}/{n_high}':>9}"
+              f"{f'{int(res.step3_sig_positive.sum())}/{n_high}':>9}   {v}")
 
     if not frames:
         raise ValueError("No alpha produced an evaluable event.")
@@ -841,26 +870,28 @@ def main(argv=None):
     event_results.to_csv(os.path.join(args.outdir, "test2_event_results.csv"), index=False)
     verdicts.to_csv(os.path.join(args.outdir, "test2_alpha_verdicts.csv"), index=False)
 
-    # ---- summary ---------------------------------------------------------
-    n_pass = int((verdicts["test2_verdict"].str.startswith("PASS")).sum())
-    n_fail = int((verdicts["test2_verdict"].str.startswith("FAIL")).sum())
+    # ---- 3. results ------------------------------------------------------
+    n_pass = int((verdicts["verdict"] == "PASS").sum())
+    n_fail = int((verdicts["verdict"] == "FAIL").sum())
     ev = event_results.loc[event_results["event_verdict"] != "INDETERMINATE"]
 
-    print(f"\nTEST 2: {n_pass} pass, {n_fail} flagged, of {len(verdicts)} alphas")
-    print(f"Scenario routing: A={int((ev['scenario'] == 'A').sum())}, "
-          f"B={int((ev['scenario'] == 'B').sum())} of {len(ev)} (alpha, event) tests")
+    print(f"\nRESULTS\n  {n_pass} of {len(verdicts)} alphas show no evidence of event-level "
+          f"memorisation; {n_fail} flagged.")
+    print(f"  {len(ev)} alpha-event tests: {int((ev['scenario'] == 'A').sum())} Scenario A "
+          f"(no low-salience match in caliper), {int((ev['scenario'] == 'B').sum())} Scenario B.")
 
     modes = ev.loc[ev["event_verdict"] == "FAIL", "binding_failure_mode"].value_counts()
-    print("Binding failure modes: "
-          + (", ".join(f"{k}={v}" for k, v in modes.items()) if len(modes) else "none"))
-    print(f"Step 1 pooled vs demeaned disagreements: {int(ev['step1_variants_disagree'].sum())} "
-          f"of {len(ev)}")
+    print("  Binding failure modes: "
+          + (", ".join(f"{k} ({v})" for k, v in modes.items()) if len(modes) else "none"))
+    print(f"  Step 1 pooled vs demeaned verdicts disagree on "
+          f"{int(ev['step1_variants_disagree'].sum())} of {len(ev)} tests.")
+    print("  A pass is the absence of evidence of event memorisation, not certification.")
 
-    print("\nUnspecified parameters used (not fixed by the spec):")
+    print("\n  Unspecified parameters (not fixed by the spec):")
     for key, val, note in UNSPECIFIED:
-        print(f"  {key} = {val}   [{note}]")
+        print(f"    {key} = {val}   [{note}]")
 
-    print(f"\nWritten to {args.outdir}")
+    print(f"\n  Written to {args.outdir}")
     return 0
 
 
