@@ -17,7 +17,8 @@ Inputs
     daily_ohlcv.parquet                         Step 3 matching covariates
 
 Outputs
-    test2_events.csv           declustered episodes, salience arms, covariates
+    test2_events.csv           declustered episodes, salience arms, covariates,
+                               BBDS coder description and dominant category
     test2_event_results.csv    one row per (alpha, event), full statistics
     test2_alpha_verdicts.csv   one row per alpha, flag counts and verdict
 
@@ -41,7 +42,7 @@ import pandas as pd
 # [SPEC] fixed by the specification.  [UNSPECIFIED] not fixed by it; these are
 # echoed at the end of every run so no assumption is silent.
 
-LLM_MODEL_TAG = "gemini-3.6-flash-v4"
+LLM_MODEL_TAG = "claude-opus-5"
 CONTROL_MODEL_TAG = "kakushadze-101-v1"
 
 WINDOW = 21                    # [SPEC] 21-day window, stride 1
@@ -79,6 +80,30 @@ PERMUTATION_SEED = 20260716
 
 # Minimum retained control alphas live on a date for CtrlMean(t) to be defined.
 CTRL_MIN_ALPHAS_PER_DATE = 5
+
+# Event naming. Both are DISPLAY METADATA ONLY and enter no statistic: they exist
+# so tables are readable without a separate lookup. Both come from BBDS itself
+# rather than from hand-labelling, so no researcher discretion is introduced.
+#   event_description   the coders' own free-text account of the jump, from the
+#                       `key_passages` sheet, at the anchor date
+#   bbds_category       the largest category share on the anchor date, from the
+#                       category columns of the jumps sheet
+BBDS_CATEGORY_COLS = [
+    "commodities", "corporate", "elections", "ERP/CC", "foreign", "govspend",
+    "Trade Policy", "macro", "monetary", "No Article", "Other NP", "Other Policy",
+    "Regulation", "sovmil", "taxes", "terror", "unknown",
+]
+BBDS_CATEGORY_LABELS = {
+    "ERP/CC": "exch rate / capital controls",
+    "govspend": "govt spending",
+    "sovmil": "sovereign military",
+    "macro": "macro news",
+    "monetary": "monetary policy",
+    "Other NP": "other non-policy",
+    "Other Policy": "other policy",
+    "Trade Policy": "trade policy",
+    "No Article": "no article",
+}
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -263,7 +288,13 @@ def load_survivor_ids(model_tag, explicit_path=None):
 
 
 def load_bbds_jumps(path, sheet=BBDS_SHEET):
-    """BBDS market jumps filtered to the 1990-2026 temporal anchor."""
+    """
+    BBDS market jumps filtered to the 1990-2026 temporal anchor.
+
+    Also carries the dominant category, taken as the largest of the BBDS category
+    shares on that day. The shares sum to 1 by construction, so the largest is the
+    modal coder attribution. Display metadata only.
+    """
     raw = pd.read_excel(path, sheet_name=sheet)
     cols = {c.strip(): c for c in raw.columns}
     need = ["date", "return", "clarity", "JournalistConfidence"]
@@ -274,9 +305,51 @@ def load_bbds_jumps(path, sheet=BBDS_SHEET):
     j = raw[[cols[c] for c in need]].copy()
     j.columns = need
     j["date"] = pd.to_datetime(j["date"])
+
+    present = [c for c in BBDS_CATEGORY_COLS if c in cols]
+    if present:
+        shares = raw[[cols[c] for c in present]].astype(np.float64).fillna(0.0)
+        top = shares.to_numpy().argmax(axis=1)
+        j["bbds_category"] = [BBDS_CATEGORY_LABELS.get(present[i], present[i]) for i in top]
+        j["bbds_category_share"] = shares.to_numpy().max(axis=1)
+    else:
+        j["bbds_category"] = ""
+        j["bbds_category_share"] = np.nan
+
     j = j.dropna(subset=need)
     in_anchor = (j["date"] >= pd.Timestamp(ANCHOR_START)) & (j["date"] <= pd.Timestamp(ANCHOR_END))
     return j.loc[in_anchor].sort_values("date").reset_index(drop=True)
+
+
+def load_bbds_descriptions(path):
+    """
+    The coders' own account of each jump, from the `key_passages` sheet.
+
+    Several coders describe the same day independently, so the shortest
+    non-empty description is taken as the label: they are near-paraphrases of one
+    another ("weak jobs report" / "dismal jobs report") and the shortest is the
+    one carrying the least editorialising. Returns date -> description, empty if
+    the sheet is missing. Coverage is partial, roughly two thirds of post-1990
+    jump days, and it stops earlier than the jump list itself.
+    """
+    try:
+        k = pd.read_excel(path, sheet_name="key_passages")
+    except (ValueError, KeyError):
+        return {}
+    if "date" not in k.columns or "description" not in k.columns:
+        return {}
+
+    k = k[["date", "description"]].copy()
+    k["date"] = pd.to_datetime(k["date"], errors="coerce")
+    k["description"] = k["description"].astype(str).str.strip()
+    k = k.loc[k["date"].notna() & k["description"].str.len().gt(0)
+              & ~k["description"].str.lower().isin(["nan", "none"])]
+    if k.empty:
+        return {}
+
+    k["_len"] = k["description"].str.len()
+    best = k.sort_values(["date", "_len"]).groupby("date", as_index=False).head(1)
+    return dict(zip(best["date"], best["description"]))
 
 
 def load_trading_calendar(parquet_path, fallback_index):
@@ -414,7 +487,7 @@ def score_salience(episodes):
     arm = np.full(len(e), "middle", dtype=object)
     arm[nc >= q_hi] = "high_salience"
     arm[nc <= q_lo] = "low_salience"
-    e["salience_arm"] = arm
+    e["salience"] = arm
     return e
 
 
@@ -446,6 +519,11 @@ def build_events(bbds_path, calendar, cov):
             ep[k] = [r[k] for r in rows]
 
     ep["event_id"] = [f"E{d:%Y%m%d}" for d in ep["date"]]
+
+    # Coder description at the anchor date. Display metadata only.
+    desc = load_bbds_descriptions(bbds_path)
+    ep["event_description"] = [desc.get(d, "") for d in ep["date"]]
+
     return ep, n_jumps, jumps["date"].max()
 
 
@@ -478,8 +556,8 @@ class Test2:
         self.ctrl_mean[ok] = total[ok] / count[ok]
 
         usable = episodes["usable"].to_numpy(dtype=bool)
-        self.high = episodes.loc[usable & (episodes["salience_arm"] == "high_salience")].copy()
-        self.low = episodes.loc[usable & (episodes["salience_arm"] == "low_salience")].copy()
+        self.high = episodes.loc[usable & (episodes["salience"] == "high_salience")].copy()
+        self.low = episodes.loc[usable & (episodes["salience"] == "low_salience")].copy()
         self.event_starts = episodes.loc[usable, "window_start"].to_numpy(dtype=int)
 
         self._build_placebo_mask()
@@ -597,6 +675,8 @@ class Test2:
                 alpha_id=alpha_id,
                 event_id=ev["event_id"],
                 event_date=ev["date"].date().isoformat(),
+                event_description=ev.get("event_description", ""),
+                bbds_category=ev.get("bbds_category", ""),
                 event_return=float(ev["return"]),
                 clarity=float(ev["clarity"]),
                 journalist_confidence=float(ev["JournalistConfidence"]),
@@ -628,7 +708,8 @@ class Test2:
         """Mahalanobis caliper, Scenario routing, Salience Gap Test."""
         res = dict(scenario="A", n_matched_low=0, matched_low_ids="",
                    nearest_low_distance=np.nan, step3_d_bar_low_composite=np.nan,
-                   step3_salience_gap=np.nan, step3_p_permutation=np.nan)
+                   step3_salience_gap=np.nan, step3_p_permutation=np.nan,
+                   step3_min_detectable_gap=np.nan, step3_gap_over_mdg=np.nan)
 
         if self.matching is None or ev["event_id"] not in self.matching["high_ids"]:
             return res
@@ -659,7 +740,11 @@ class Test2:
 
         d_high = daily_differentials(y, x, valid_paired, s, WINDOW, beta[s])
         d_lows = [low_daily[i] for i in ids]
-        res["step3_p_permutation"] = self._permutation(d_high, d_lows, w, rng)
+        p3, mdg = self._permutation(d_high, d_lows, w, rng)
+        res["step3_p_permutation"] = p3
+        res["step3_min_detectable_gap"] = mdg
+        if np.isfinite(mdg) and mdg > 0:
+            res["step3_gap_over_mdg"] = res["step3_salience_gap"] / mdg
         return res
 
     @staticmethod
@@ -669,10 +754,21 @@ class Test2:
         positive? Days are pooled across the high window and every matched low
         window and randomly reassigned to slots of the original sizes, so the
         permuted statistic is the same functional as the observed one.
+
+        Returns (p_value, minimum_detectable_gap).
+
+        The minimum detectable gap is the (1 - ALPHA_LEVEL) quantile of the
+        permutation null: the smallest salience gap this event could have
+        produced and still returned p <= ALPHA_LEVEL. It is a property of the
+        matched design alone - the window length, the number of matched twins
+        and the day-level dispersion of the differentials - and does not depend
+        on how the alpha actually performed. It is what makes a null result
+        quantitative: a gap of zero against a detection floor of 0.002 is a
+        tight null, the same gap against a floor of 0.05 is an underpowered one.
         """
         sizes = [len(d_high)] + [len(a) for a in d_lows]
         if min(sizes) == 0:
-            return np.nan
+            return np.nan, np.nan
 
         observed = d_high.mean() - float(np.dot(w, [a.mean() for a in d_lows]))
         pool = np.concatenate([d_high] + d_lows)
@@ -681,11 +777,22 @@ class Test2:
         slot_means = np.column_stack([
             permuted[:, bounds[k]: bounds[k + 1]].mean(axis=1) for k in range(len(sizes))
         ])
-        return float(np.mean(slot_means[:, 0] - slot_means[:, 1:] @ w >= observed))
+        null = slot_means[:, 0] - slot_means[:, 1:] @ w
+        p = float(np.mean(null >= observed))
+        mdg = float(np.quantile(null, 1.0 - ALPHA_LEVEL))
+        return p, mdg
 
     @staticmethod
     def _fdr_and_verdicts(df):
-        """Benjamini-Hochberg within the alpha, then the Scenario A/B verdict rules."""
+        """
+        Benjamini-Hochberg within the alpha, then the unified verdict rule.
+
+        An event fails if (Step 1 AND Step 2) OR Step 3. The rule is identical in
+        both scenarios; Scenario A is simply the case where Step 3 cannot be
+        computed, so the Step 3 term is always False there. Evidential standards
+        therefore no longer depend on whether the market happened to supply a
+        structural twin.
+        """
         r2, q2 = benjamini_hochberg(df["step2_p_placebo"].to_numpy(dtype=np.float64), FDR_ALPHA)
         r3, q3 = benjamini_hochberg(df["step3_p_permutation"].to_numpy(dtype=np.float64), FDR_ALPHA)
         df["step2_q_bh"], df["step3_q_bh"] = q2, q3
@@ -701,22 +808,30 @@ class Test2:
                 binding.append("insufficient_data")
                 continue
 
-            if r["scenario"] == "A":
-                # Fails if a Step 1 anomaly survives as a significant positive
-                # Step 2 differential.
-                fail = bool(r["step1_anomaly"] and r["step2_sig_positive"])
-                verdicts.append("FAIL" if fail else "PASS")
-                binding.append("step1_anomaly_and_control_differential" if fail else "none")
-            else:
-                # Must pass BOTH the Salience Gap Test and the Control
-                # Differential Test.
-                gap, ctrl = bool(r["step3_sig_positive"]), bool(r["step2_sig_positive"])
-                verdicts.append("FAIL" if (gap or ctrl) else "PASS")
-                binding.append(
-                    "salience_gap_and_control_differential" if gap and ctrl else
-                    "salience_gap" if gap else
-                    "control_differential" if ctrl else "none"
-                )
+            # Unified rule across both scenarios: (Step 1 AND Step 2) OR Step 3.
+            #
+            # The conjunction is the anomaly arm. Step 1 (unpaired, against the
+            # human control window distribution) and Step 2 (paired, against the
+            # alpha's own placebo windows) are distinct statistics with distinct
+            # nulls, but both compare an event window to a NON-event baseline, so
+            # both detect crisis sensitivity rather than narrative salience.
+            # Requiring them jointly raises the bar on that non-identifying
+            # evidence; it does not make it identifying.
+            #
+            # Step 3 is the identifying arm. It is the only comparison that holds
+            # structural severity fixed and varies only fame, so it stands alone.
+            # In Scenario A it is unavailable, and the rule degenerates to the
+            # conjunction - which is why Scenario A failures are anomalies of
+            # unattributable cause, not demonstrated memorisation.
+            anom = bool(r["step1_anomaly"] and r["step2_sig_positive"])
+            gap = bool(r["step3_sig_positive"])  # always False in Scenario A
+
+            verdicts.append("FAIL" if (anom or gap) else "PASS")
+            binding.append(
+                "anomaly_and_salience_gap" if anom and gap else
+                "salience_gap" if gap else
+                "step1_anomaly_and_control_differential" if anom else "none"
+            )
 
         df["event_verdict"] = verdicts
         df["binding_failure_mode"] = binding
@@ -754,6 +869,9 @@ def synthesise(event_results):
             step1_anomaly_flags=int(ev["step1_anomaly"].sum()),
             step2_differential_flags=int(ev["step2_sig_positive"].sum()),
             step3_salience_gap_flags=int(ev["step3_sig_positive"].sum()),
+            step3_median_mdg=float(ev["step3_min_detectable_gap"].median(skipna=True)),
+            step3_max_gap_over_mdg=float(ev["step3_gap_over_mdg"].max(skipna=True))
+                if ev["step3_gap_over_mdg"].notna().any() else np.nan,
             binding_failure_mode=", ".join(sorted(set(modes))) if n_fail else "none",
         ))
     return pd.DataFrame(out)
@@ -825,19 +943,27 @@ def main(argv=None):
 
     # matches = low-salience events inside the caliper, which is what routes an
     # event to Scenario A (rely on the control differential) or B (also test the
-    # salience gap against the matched composite).
-    print(f"\n  {'event date':<13}{'return':>8}{'consensus':>11}{'matches':>9}   "
-          f"{WINDOW}-day window")
-    for i, (_, e) in enumerate(engine.high.sort_values("date").iterrows()):
+    # salience gap against the matched composite). Descriptions are BBDS coders'
+    # own; windows are the anchor day +/- 10 sessions and are in test2_events.csv.
+    print(f"\n  {'event date':<13}{'return':>8}{'consensus':>11}{'matches':>9}   description")
+    for _, e in engine.high.sort_values("date").iterrows():
         if engine.matching is None:
             n_m = "-"
         else:
             row = engine.matching["distance"][engine.matching["high_ids"].index(e["event_id"])]
             n_m = int(np.sum(np.isfinite(row) & (row <= MAHALANOBIS_CALIPER)))
+
+        label = str(e.get("event_description", "") or "")
+        cat = str(e.get("bbds_category", "") or "")
+        if len(label) > 58:
+            label = label[:55].rstrip() + "..."
+        if not label:
+            label = f"[no BBDS description]"
+        if cat:
+            label = f"{label}  ({cat})"
+
         print(f"  {str(e['date'].date()):<13}{e['return']:>+8.2%}"
-              f"{e['narrative_consensus']:>11.2f}{str(n_m):>9}   "
-              f"{pd.Timestamp(e['window_first_date']).date()} to "
-              f"{pd.Timestamp(e['window_last_date']).date()}")
+              f"{e['narrative_consensus']:>11.2f}{str(n_m):>9}   {label}")
 
     # ---- 2. alphas -------------------------------------------------------
     print(f"\nALPHAS\n  {len(subjects)} LLM alphas"
@@ -845,7 +971,9 @@ def main(argv=None):
           f" against a control baseline of {ctrl_panel.shape[1]} alphas, "
           f"{int(engine.placebo_allowed.sum())} placebo windows.")
     print(f"  Counts are high-salience events flagged, out of {n_high}. An alpha fails only")
-    print("  where the Scenario A or B rule binds, so flags alone are not failures.\n")
+    print("  where (Step 1 AND Step 2) OR Step 3 binds, so flags alone are not failures.")
+    print("  Step 3 is unavailable in Scenario A, so those failures bind on the")
+    print("  conjunction alone and are anomalies of unattributable cause.\n")
     print(f"  {'alpha':<30}{'Step 1':>9}{'Step 2':>9}{'Step 3':>9}   verdict")
     print(f"  {'':<30}{'anomaly':>9}{'differ.':>9}{'sal. gap':>9}")
 
@@ -885,6 +1013,27 @@ def main(argv=None):
           + (", ".join(f"{k} ({v})" for k, v in modes.items()) if len(modes) else "none"))
     print(f"  Step 1 pooled vs demeaned verdicts disagree on "
           f"{int(ev['step1_variants_disagree'].sum())} of {len(ev)} tests.")
+
+    b = ev.loc[(ev["scenario"] == "B") & ev["step3_min_detectable_gap"].notna()]
+    if not b.empty:
+        mdg = b["step3_min_detectable_gap"]
+        ratio = b["step3_gap_over_mdg"]
+        print(f"\n  Step 3 detection floor over {len(b)} Scenario B tests: median "
+              f"{mdg.median():.5f} Rank IC, range {mdg.min():.5f} to {mdg.max():.5f}.")
+        print(f"  Largest observed gap reaches {ratio.max():.2f}x its own floor; "
+              f"{int((ratio >= 1.0).sum())} of {len(b)} tests reach it.")
+        print("  A null salience gap is only as strong as this floor is low.")
+
+        by_ev = (b.groupby("event_date")
+                  .agg(matches=("n_matched_low", "first"),
+                       mdg=("step3_min_detectable_gap", "median"))
+                  .sort_values("mdg", ascending=False))
+        print(f"\n  {'event date':<13}{'matches':>9}{'floor':>10}   least to most powered")
+        for d, r in by_ev.head(3).iterrows():
+            print(f"  {d:<13}{int(r['matches']):>9}{r['mdg']:>10.5f}")
+        print(f"  {'...':<13}")
+        for d, r in by_ev.tail(3).iterrows():
+            print(f"  {d:<13}{int(r['matches']):>9}{r['mdg']:>10.5f}")
     print("  A pass is the absence of evidence of event memorisation, not certification.")
 
     print("\n  Unspecified parameters (not fixed by the spec):")
