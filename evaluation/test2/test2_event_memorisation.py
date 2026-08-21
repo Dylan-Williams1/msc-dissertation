@@ -702,7 +702,70 @@ class Test2:
             rows.append(row)
 
         out = pd.DataFrame(rows)
-        return self._fdr_and_verdicts(out) if not out.empty else out
+        if out.empty:
+            return out
+        for k, v in self.salience_gradient(d_bar, rng).items():
+            out[k] = v
+        return self._fdr_and_verdicts(out)
+
+    def salience_gradient(self, d_bar, rng):
+        """
+        Continuous complement to Step 3, across ALL declustered episodes rather
+        than the high/low quartiles alone.
+
+        Regresses the episode differential on narrative consensus, controlling
+        for structural severity:
+
+            d_bar_e = a + b*NC_e + c*vol_e + d*drawdown_e + e*dispersion_e
+
+        and tests b > 0. This asks whether the alpha's event-window edge scales
+        with fame HOLDING SEVERITY FIXED - the same identification matching
+        provides, but by control rather than pairing. Two consequences: the
+        middle quartiles are used instead of discarded, and unmatchable events
+        (which Step 3 cannot touch at all) still contribute.
+
+        A uniformly better alpha shifts every d_bar by a constant, which loads
+        on the intercept and cannot produce a slope, so "this alpha is simply
+        stronger than the controls" is not a confound here.
+
+        Significance is by permuting the NC labels across episodes, which holds
+        the severity structure fixed under the null. Reported alongside the
+        NC-on-severity R^2: if fame and severity are near-collinear in this
+        sample, b is weakly identified and the slope should not be trusted.
+        """
+        cols = ["realized_vol", "drawdown_depth", "cs_dispersion"]
+        ep = self.episodes.loc[self.episodes["usable"]].copy()
+        s = ep["window_start"].to_numpy(dtype=int)
+        ok = (s >= 0) & (s < self.n_windows)
+        y = np.where(ok, d_bar[np.clip(s, 0, self.n_windows - 1)], np.nan)
+
+        Z = ep[cols].to_numpy(dtype=np.float64)
+        nc = ep["narrative_consensus"].to_numpy(dtype=np.float64)
+        keep = np.isfinite(y) & np.isfinite(nc) & np.isfinite(Z).all(axis=1)
+        if keep.sum() < len(cols) + 3:
+            return dict(grad_slope=np.nan, grad_p=np.nan,
+                        grad_n_episodes=int(keep.sum()), grad_nc_severity_r2=np.nan)
+
+        y, nc, Z = y[keep], nc[keep], Z[keep]
+        n = len(y)
+
+        def slope(nc_vec):
+            X = np.column_stack([np.ones(n), nc_vec, Z])
+            return float(np.linalg.lstsq(X, y, rcond=None)[0][1])
+
+        observed = slope(nc)
+        null = np.array([slope(rng.permutation(nc)) for _ in range(N_PERMUTATIONS // 10)])
+
+        # How much of NC is already explained by severity alone.
+        Xs = np.column_stack([np.ones(n), Z])
+        resid = nc - Xs @ np.linalg.lstsq(Xs, nc, rcond=None)[0]
+        ss = float(np.sum((nc - nc.mean()) ** 2))
+        r2 = 1.0 - float(np.sum(resid ** 2)) / ss if ss > 0 else np.nan
+
+        return dict(grad_slope=observed,
+                    grad_p=float(np.mean(null >= observed)),
+                    grad_n_episodes=n,
+                    grad_nc_severity_r2=r2)
 
     def _step3(self, ev, s, d_event, beta, y, x, valid_paired, low_dbar, low_daily, rng):
         """Mahalanobis caliper, Scenario routing, Salience Gap Test."""
@@ -838,6 +901,49 @@ class Test2:
         return df
 
 
+def plot_event_ic(engine, alpha_ids, llm_panel, event_date, outdir):
+    """
+    Raw diagnostic for a single event window: the alpha's own Rank IC against
+    CtrlMean, both untransformed.
+
+    d_bar = IC_alpha - beta*CtrlMean rises either because the alpha did well or
+    because the control corpus did badly, and the differential alone cannot tell
+    those apart. Plotting the two series separately does.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ep = engine.episodes
+    hit = ep[ep["date"].astype(str).str.startswith(str(event_date))]
+    if hit.empty:
+        print(f"  [plot] no episode anchored on {event_date}")
+        return
+    s = int(hit.iloc[0]["window_start"])
+    if not (0 <= s < engine.n_windows):
+        print(f"  [plot] window for {event_date} is outside the calendar")
+        return
+
+    days = engine.calendar[s: s + WINDOW]
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    for aid in alpha_ids:
+        y = llm_panel[aid].reindex(engine.calendar).to_numpy(dtype=np.float64)
+        ax.plot(days, y[s: s + WINDOW], lw=0.9, alpha=0.55, color="tab:blue")
+    ax.plot(days, engine.ctrl_mean[s: s + WINDOW], lw=2.4, color="tab:red",
+            label="CtrlMean (control corpus)")
+    ax.plot([], [], lw=0.9, color="tab:blue", alpha=0.55, label="LLM alphas (raw IC)")
+    ax.axhline(0.0, lw=0.7, color="0.6")
+    ax.set_title(f"Raw daily Rank IC around {event_date}")
+    ax.set_ylabel("Rank IC")
+    ax.legend(frameon=False, fontsize=9)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    path = os.path.join(outdir, f"test2_ic_{str(event_date).replace('-', '')}.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"  [plot] {path}")
+
+
 def synthesise(event_results):
     """
     One row per alpha. Every column is a count of high-salience events, so all
@@ -893,6 +999,8 @@ def main(argv=None):
     ap.add_argument("--outdir", default=OUTPUT_DIR)
     ap.add_argument("--llm-tag", default=LLM_MODEL_TAG)
     ap.add_argument("--control-tag", default=CONTROL_MODEL_TAG)
+    ap.add_argument("--plot-event", default=None,
+                    help="Anchor date (YYYY-MM-DD) to plot raw alpha IC vs CtrlMean.")
     ap.add_argument("--all-alphas", action="store_true",
                     help="Evaluate every LLM alpha, not just Phase 1 survivors.")
     args = ap.parse_args(argv)
@@ -996,6 +1104,20 @@ def main(argv=None):
     event_results = pd.concat(frames, ignore_index=True)
     verdicts = synthesise(event_results)
     event_results.to_csv(os.path.join(args.outdir, "test2_event_results.csv"), index=False)
+
+    if args.plot_event:
+        plot_event_ic(engine, list(subjects), llm_panel, args.plot_event, args.outdir)
+
+    g = (event_results.groupby("alpha_id")
+         .agg(slope=("grad_slope", "first"), p=("grad_p", "first"),
+              n=("grad_n_episodes", "first"), r2=("grad_nc_severity_r2", "first")))
+    if g["slope"].notna().any():
+        print(f"\n  Salience gradient over {int(g['n'].max())} episodes "
+              f"(d_bar on narrative consensus, severity controlled):")
+        print(f"    slope: median {g['slope'].median():+.4f}, "
+              f"{int((g['p'] <= ALPHA_LEVEL).sum())} of {len(g)} alphas with p <= {ALPHA_LEVEL}")
+        print(f"    NC explained by severity: R^2 = {g['r2'].iloc[0]:.2f}"
+              f"{'  (near-collinear; slope weakly identified)' if g['r2'].iloc[0] > 0.7 else ''}")
     verdicts.to_csv(os.path.join(args.outdir, "test2_alpha_verdicts.csv"), index=False)
 
     # ---- 3. results ------------------------------------------------------
