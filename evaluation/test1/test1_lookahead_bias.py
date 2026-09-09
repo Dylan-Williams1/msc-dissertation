@@ -104,7 +104,16 @@ def compute_differentials(trt_ic, ctrl_ic, cutoff_date):
     Calculates d_i(t) = IC_i(t) - beta_i * CtrlMean(t) [P1].
     Beta is strictly estimated IN-SAMPLE and applied out-of-sample.
     """
+    common_idx = trt_ic.index.intersection(ctrl_ic.index)
+    trt_ic = trt_ic.loc[common_idx]
+    ctrl_ic = ctrl_ic.loc[common_idx]
+
     is_mask = ctrl_ic.index < cutoff_date
+
+    dropped = len(trt_ic.index) - len(common_idx)
+    if dropped:
+        print(f"   ! dropped {dropped} treatment dates absent from controls; "
+              f"{len(common_idx)} in common")
     
     # 1. Treatment Differentials
     ctrl_mean = ctrl_ic.mean(axis=1)
