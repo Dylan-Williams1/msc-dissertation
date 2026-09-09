@@ -1,4 +1,7 @@
 import os
+import glob
+import json
+import sys
 
 import numpy as np
 import pandas as pd
@@ -15,6 +18,12 @@ PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
 
 TREATMENT_KEY = "gemini-3.6-flash-v5"   # basename of ALPHA_DIR
 CONTROL_KEY = "kakushadze-101-v1"       # basename of CONTROL_DIR
+
+
+ROOT_DIR = os.path.dirname(PHASE1_IC_DIR)   # ...\Dissertation
+ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", TREATMENT_KEY)
+CONTROL_DIR = os.path.join(ROOT_DIR, "alphas", "survived", CONTROL_KEY)
+
 
 TREATMENT_IC_PATH = os.path.join(
     PHASE1_IC_DIR, f"phase1_daily_rank_ic_{TREATMENT_KEY}.csv")
@@ -105,15 +114,14 @@ def compute_differentials(trt_ic, ctrl_ic, cutoff_date):
     Beta is strictly estimated IN-SAMPLE and applied out-of-sample.
     """
     common_idx = trt_ic.index.intersection(ctrl_ic.index)
-    trt_ic = trt_ic.loc[common_idx]
-    ctrl_ic = ctrl_ic.loc[common_idx]
-
-    is_mask = ctrl_ic.index < cutoff_date
-
     dropped = len(trt_ic.index) - len(common_idx)
     if dropped:
         print(f"   ! dropped {dropped} treatment dates absent from controls; "
               f"{len(common_idx)} in common")
+    trt_ic = trt_ic.loc[common_idx]
+    ctrl_ic = ctrl_ic.loc[common_idx]
+
+    is_mask = ctrl_ic.index < cutoff_date
     
     # 1. Treatment Differentials
     ctrl_mean = ctrl_ic.mean(axis=1)
@@ -334,8 +342,55 @@ def load_phase1_ic(path):
     df = df.sort_index().apply(pd.to_numeric, errors="coerce")
     return df.dropna(axis=1, how="all")
 
+def restrict_to_corpus(ic, alpha_dir, label):
+    """Restrict a Phase 1 IC panel to the alphas present in alpha_dir.
+
+    The Phase 1 CSV is the FULL evaluated corpus, not the survivors. Every
+    failure path exits rather than falling back to it.
+    """
+    if not os.path.isdir(alpha_dir):
+        sys.exit(f"\n[{label}] survivor directory not found: {alpha_dir}\n"
+                 "  Refusing to fall back to the full Phase 1 corpus.")
+    files = sorted(glob.glob(os.path.join(alpha_dir, "*.json")))
+    if not files:
+        sys.exit(f"\n[{label}] ZERO SURVIVING ALPHAS in {alpha_dir}.\n"
+                 "  This is a result, not an error.")
+
+    ids = []
+    for fp in files:
+        stem = os.path.splitext(os.path.basename(fp))[0]
+        try:
+            rec = json.load(open(fp, encoding="utf-8"))
+            ids.append(str(rec.get("metadata", {}).get("alpha_id", stem)))
+        except Exception:
+            ids.append(stem)
+
+    lower = {c.lower(): c for c in ic.columns}
+    keep, missing = [], []
+    for aid in ids:
+        if aid in ic.columns:
+            keep.append(aid)
+        elif aid.lower() in lower:
+            keep.append(lower[aid.lower()])
+        else:
+            missing.append(aid)
+    keep = list(dict.fromkeys(keep))
+
+    print(f"   [{label}] CSV has {ic.shape[1]} alphas; {alpha_dir} holds "
+          f"{len(ids)} artifacts; matched {len(keep)}")
+    if missing:
+        sys.exit(f"\n[{label}] {len(missing)} SURVIVOR(S) HAVE NO IC SERIES:\n"
+                 f"  {', '.join(missing)}\n\n"
+                 "  A survivor absent from the Phase 1 panel is a data problem, "
+                 "not a smaller corpus.\n  Fix the export or the column naming; "
+                 "do not run on the subset that happened to match.")
+    if not keep:
+        sys.exit(f"\n[{label}] no survivor matched any IC column.")
+    return ic[keep]
 
 if __name__ == "__main__":
-    df_trt = load_phase1_ic(TREATMENT_IC_PATH)
-    df_ctrl = load_phase1_ic(CONTROL_IC_PATH)
+    df_trt = restrict_to_corpus(load_phase1_ic(TREATMENT_IC_PATH),
+                                ALPHA_DIR, "treatment")
+    df_ctrl = restrict_to_corpus(load_phase1_ic(CONTROL_IC_PATH),
+                                 CONTROL_DIR, "control")
     results_df, pool_p = run_pipeline(df_trt, df_ctrl, CUTOFF_DATE, END_DATE)
