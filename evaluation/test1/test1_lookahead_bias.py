@@ -281,7 +281,14 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
     mean_noise = np.mean(var_rho_noise)
     var_true = max(0, var_obs - mean_noise)
     r = np.mean(rho_j) + 1.645 * np.sqrt(var_true)
-    median_base_j = np.median(base_means)
+    print(f"   r calibrated on {len(rho_j)} of {len(ctrl_results)} scored controls "
+          f"({len(ctrl_results) - len(rho_j)} dropped for base_mean <= 0)")
+    print(f"      mean rho {np.mean(rho_j):+.4f} | noise-corrected sd "
+          f"{np.sqrt(var_true):.4f} | r {r:.4f}")
+    if r >= 1.0:
+        print("      ! r >= 1: delta exceeds the entire baseline, so Flag 2 cannot "
+              "fire until\n        oos_mean goes NEGATIVE. This is a resolution "
+              "limit, not a pass.")
     
     ctrl_stats = {'r': r, 'median_base_j': median_base_j}
     print(f"   Control Tolerance Calibrated: r = {r:.4f}")
@@ -322,16 +329,35 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
     
     mw_stat, mw_p = stats.mannwhitneyu(llm_z_drops, ctrl_z_drops, alternative='greater')
     
-    print("\n" + "="*50)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    out_df.to_csv(os.path.join(OUT_DIR, f"test1_per_alpha_{TREATMENT_KEY}.csv"))
+    ctrl_df = pd.DataFrame(ctrl_results).T
+    ctrl_df.index.name = "alpha_id"
+    ctrl_df.to_csv(os.path.join(OUT_DIR, f"test1_controls_{CONTROL_KEY}.csv"))
+    trt_diffs.to_csv(os.path.join(OUT_DIR, f"test1_differentials_{TREATMENT_KEY}.csv"))
+
+    f1 = out_df['flag_1'].astype(bool)
+    f2 = out_df['flag_2'].astype(bool)
+
+    print("\n" + "=" * 72)
     print("V2 PIPELINE RESULTS")
-    print("="*50)
-    print(f"Per-Alpha Failures (Flag 1 & Flag 2): {(out_df['verdict'] == 'FAILED').sum()} / {len(out_df)}")
-    print(f"Pool-Level Mann-Whitney P-Value   : {mw_p:.4f}")
+    print("=" * 72)
+    cols = ['base_mean', 'oos_mean', 'drop_oos', 'delta', 'z_oos', 'p1',
+            'z_drop', 'p2', 'flag_1', 'flag_2', 'verdict']
+    print(out_df[cols].to_string(float_format=lambda v: f"{v:.4f}"))
+    print(f"\n   Flag 1 (rarity)      : {int(f1.sum())} / {len(out_df)}")
+    print(f"   Flag 2 (excess decay): {int(f2.sum())} / {len(out_df)}")
+    print(f"   BOTH -> FAILED       : {int((out_df['verdict'] == 'FAILED').sum())}"
+          f" / {len(out_df)}")
+    print(f"\n   Pool-level Mann-Whitney p = {mw_p:.4f} "
+          f"(n_llm={len(llm_z_drops)}, n_ctrl={len(ctrl_z_drops)})")
     if mw_p < ALPHA_LEVEL:
-        print("   -> POOL LEVEL FAILED: The LLM alpha distribution is significantly left-shifted vs. controls.")
+        print("   -> LLM z_drop distribution is RIGHT-shifted vs controls "
+              "(higher z_drop = worse excess decay).")
     else:
-        print("   -> POOL LEVEL PASSED: No systemic look-ahead bias detected in aggregate.")
-        
+        print("   -> No systemic difference detected in aggregate.")
+    print(f"\n-> {OUT_DIR}")
+
     return out_df, mw_p
 
 def load_phase1_ic(path):
