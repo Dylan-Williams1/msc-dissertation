@@ -1,14 +1,26 @@
+import os
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 # ==============================================================================
-# CONFIGURATION & PARAMETERS (File paths left blank per request)
+# CONFIGURATION & PARAMETERS
 # ==============================================================================
-# Paths to be provided later
-TREATMENT_IC_PATH = ""  
-CONTROL_IC_PATH = ""    
-OUT_DIR = ""            
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Mirrors instrument1_shortwindow.py: Phase 1 already exported daily Rank IC
+# per alpha as phase1_daily_rank_ic_<model_key>.csv, and it is not regenerated.
+PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
+
+TREATMENT_KEY = "gemini-3.6-flash-v5"   # basename of ALPHA_DIR
+CONTROL_KEY = "kakushadze-101-v1"       # basename of CONTROL_DIR
+
+TREATMENT_IC_PATH = os.path.join(
+    PHASE1_IC_DIR, f"phase1_daily_rank_ic_{TREATMENT_KEY}.csv")
+CONTROL_IC_PATH = os.path.join(
+    PHASE1_IC_DIR, f"phase1_daily_rank_ic_{CONTROL_KEY}.csv")
+OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
 
 # Core Parameters from v2 Spec
 CUTOFF_DATE = "2026-01-01"  
@@ -305,9 +317,16 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
         
     return out_df, mw_p
 
+def load_phase1_ic(path):
+    """Read a Phase 1 Rank IC panel (dates on the index, alpha_ids as columns)."""
+    df = pd.read_csv(path, index_col=0)
+    df.index = pd.to_datetime(df.index)
+    df.index.name = "date"
+    df = df.sort_index().apply(pd.to_numeric, errors="coerce")
+    return df.dropna(axis=1, how="all")
+
+
 if __name__ == "__main__":
-    # Placeholder for loading data
-    # df_trt = pd.read_parquet(TREATMENT_IC_PATH)
-    # df_ctrl = pd.read_parquet(CONTROL_IC_PATH)
-    # results_df, pool_p = run_pipeline(df_trt, df_ctrl, CUTOFF_DATE, END_DATE)
-    pass
+    df_trt = load_phase1_ic(TREATMENT_IC_PATH)
+    df_ctrl = load_phase1_ic(CONTROL_IC_PATH)
+    results_df, pool_p = run_pipeline(df_trt, df_ctrl, CUTOFF_DATE, END_DATE)
