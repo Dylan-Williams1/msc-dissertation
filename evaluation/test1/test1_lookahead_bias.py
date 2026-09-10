@@ -68,18 +68,16 @@ def newey_west_se(series, h=HORIZON_H):
     if T < 5:
         return np.nan, np.nan
     
-    q = int(max(h - 1, np.floor(4 * (T / 100.0) ** (2.0 / 9.0))))
-    x_mean = series.mean()
+        x_mean = series.mean()
     xc = series.to_numpy(dtype=float) - x_mean
+
+    # Autocorrelation in d is ~0 at every lag (h=1, so each day's Rank IC uses
+    # a fresh non-overlapping forward return). The NW correction is therefore
+    # dropped: stationary_block_bootstrap_z studentises with the iid variance,
+    # and the statistic and its null must use the SAME estimator or p1 ranks
+    # numbers measured on different scales.
+    lrv = max(np.sum(xc ** 2) / T, 1e-14)]
     
-    # Long-run variance (lrv)
-    lrv = np.sum(xc ** 2) / T
-    for j in range(1, q + 1):
-        gamma_j = np.sum(xc[j:] * xc[:-j]) / T
-        weight = 1.0 - j / (q + 1.0)
-        lrv += 2 * weight * gamma_j
-        
-    lrv = max(lrv, 1e-14)
     se = np.sqrt(lrv / T)
     return lrv, se
 
