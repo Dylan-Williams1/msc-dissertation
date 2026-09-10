@@ -16,7 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # per alpha as phase1_daily_rank_ic_<model_key>.csv, and it is not regenerated.
 PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
 
-TREATMENT_KEY = "gemini-3.6-flash-v5"   # basename of ALPHA_DIR
+TREATMENT_KEY = "claude-opus-5"   # basename of ALPHA_DIR
 CONTROL_KEY = "kakushadze-101-v1"       # basename of CONTROL_DIR
 
 
@@ -32,8 +32,23 @@ CONTROL_IC_PATH = os.path.join(
 OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
 
 # Core Parameters from v2 Spec
-CUTOFF_DATE = "2026-01-01"  
-END_DATE = "2026-07-16"     
+# Model knowledge cutoffs are month-granularity. "2026-05" means the model
+# knows everything THROUGH May, so the OOS window opens on 1 June. Reading it
+# as 1 May would place a known month inside the OOS window and bias the test
+# toward detecting decay that is not there.
+MODEL_CUTOFFS = {
+    "claude-opus-5":       "2026-05",
+    "gemini-3.6-flash-v5": "2026-03",
+    "gpt-5.6-sol":         "2026-02",
+}
+
+if TREATMENT_KEY not in MODEL_CUTOFFS:
+    sys.exit(f"\nNo knowledge cutoff recorded for '{TREATMENT_KEY}'.\n"
+             "  Add it to MODEL_CUTOFFS; do not fall back to a shared default.")
+
+CUTOFF_DATE = (pd.Period(MODEL_CUTOFFS[TREATMENT_KEY], freq="M")
+                 .end_time.normalize() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+END_DATE = "2026-09-09"    
 HORIZON_H = 1               # Forward-return horizon (h)
 TRAILING_BLOCKS_B = 4       # Number of trailing blocks in baseline (B)
 BOOTSTRAP_M = 10000         # Stationary bootstrap iterations (M)
@@ -207,23 +222,21 @@ def execute_v2_test(d_series, is_series, oos_series, L, ctrl_stats=None):
     if ctrl_stats is None:
         return res
         
-    # --- Step 2.3 & 2.5: Control Tolerance & Z-Test ---
-    r = ctrl_stats['r']
-    median_base_j = ctrl_stats['median_base_j']
-    
-    # Calculate delta with the required median floor [2.3]
-    delta = max(r * base_mean, r * median_base_j)
-    
-    # Z-Test [2.5]
-    z_drop = (drop_oos - delta) / se_drop if se_drop > 0 else np.nan
-    p2 = 1.0 - stats.norm.cdf(z_drop) if np.isfinite(z_drop) else np.nan
-    flag_2 = z_drop > 1.645
+    t_crit = ctrl_stats['t_crit']
+    ctrl_t = ctrl_stats['ctrl_t']
+
+    t_drop = drop_oos / se_drop if se_drop > 0 else np.nan
+    if np.isfinite(t_drop):
+        p2 = (1.0 + np.sum(ctrl_t >= t_drop)) / (1.0 + len(ctrl_t))
+        flag_2 = bool(t_drop > t_crit)
+    else:
+        p2, flag_2 = np.nan, False
     
     # Final Verdict [3]
     failed = flag_1 and flag_2
     
     res.update({
-        'delta': delta, 'z_drop': z_drop, 'p2': p2, 
+        't_crit': t_crit, 'z_drop': t_drop, 'p2': p2, 
         'flag_2': flag_2, 'verdict': 'FAILED' if failed else 'PASSED'
     })
     return res
@@ -242,9 +255,21 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
     # Restrict to OOS window
     oos_mask_trt = (trt_diffs.index >= cutoff) & (trt_diffs.index <= end)
     L = int(oos_mask_trt.sum())
+    print(f"   cutoff = {CUTOFF_DATE} (from {TREATMENT_KEY} knowledge cutoff "
+          f"{MODEL_CUTOFFS[TREATMENT_KEY]}), end = {END_DATE}")
     print(f"   L (OOS Trading Days) = {L}")
     
     is_mask_trt = trt_diffs.index < cutoff
+
+    off = lambda m: m.values[np.triu_indices_from(m.values, k=1)]
+    for nm, D in [("treatment", trt_diffs), ("control", ctrl_diffs)]:
+        X = D.loc[is_mask_trt].astype(float)
+        print(f"{nm}: var(d) {X.var().mean():.2e} | mean pairwise corr "
+              f"{np.nanmean(off(X.corr())):+.3f} | n={X.shape[1]}")
+        
+    d0 = trt_diffs.iloc[:, 0].astype(float).dropna()
+    print(f"autocorr of d ({trt_diffs.columns[0]}): "
+          f"{[round(d0.autocorr(k), 3) for k in range(1, 6)]}")
     
     print("2. Processing Control Alphas (Leave-One-Out) for Tolerance (delta)...")
     ctrl_results = {}
@@ -255,44 +280,29 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
             continue
         ctrl_results[col] = execute_v2_test(ctrl_diffs[col], is_s, oos_s, L, ctrl_stats=None)
         
-    # Calculate r using the Delta Method for standard error of a ratio [2.3]
-    rho_j = []
-    var_rho_noise = []
-    base_means = []
-    
+        # Flag 2 threshold is the 95th percentile of the CONTROLS' OWN studentised
+    # drops over the identical window. No ratio (control d_base is centred at
+    # ~0, so rho explodes) and no variance decomposition (Var(rho) is
+    # cross-sectional while mean(SE_j^2) is time-series, so the subtraction
+    # removes common-window noise that never entered the spread and var_true
+    # clips to zero structurally).
+    ctrl_t = []
     for c, r_dict in ctrl_results.items():
-        b_mean = r_dict['base_mean']
-        o_mean = r_dict['oos_mean']
-        b_se = r_dict['base_se']
-        o_se = r_dict['oos_se']
-        
-        if b_mean <= 0: # Avoid division by zero or negative baselines
-            continue
-            
-        rho = (b_mean - o_mean) / b_mean
-        rho_j.append(rho)
-        base_means.append(b_mean)
-        
-        # SE of ratio (OOS / Base) via delta method
-        se_ratio_sq = (o_se**2 / b_mean**2) + ((o_mean**2 * b_se**2) / b_mean**4)
-        var_rho_noise.append(se_ratio_sq)
-        
-    var_obs = np.var(rho_j, ddof=1)
-    mean_noise = np.mean(var_rho_noise)
-    var_true = max(0, var_obs - mean_noise)
-    r = np.mean(rho_j) + 1.645 * np.sqrt(var_true)
-    print(f"   r calibrated on {len(rho_j)} of {len(ctrl_results)} scored controls "
-          f"({len(ctrl_results) - len(rho_j)} dropped for base_mean <= 0)")
-    print(f"      mean rho {np.mean(rho_j):+.4f} | noise-corrected sd "
-          f"{np.sqrt(var_true):.4f} | r {r:.4f}")
-    if r >= 1.0:
-        print("      ! r >= 1: delta exceeds the entire baseline, so Flag 2 cannot "
-              "fire until\n        oos_mean goes NEGATIVE. This is a resolution "
-              "limit, not a pass.")
-    
-    ctrl_stats = {'r': r, 'median_base_j': median_base_j}
-    print(f"   Control Tolerance Calibrated: r = {r:.4f}")
+        dj, sj = r_dict['drop_oos'], r_dict['se_drop']
+        if np.isfinite(dj) and np.isfinite(sj) and sj > 0:
+            ctrl_t.append(dj / sj)
+    ctrl_t = np.asarray(ctrl_t)
 
+    if len(ctrl_t) < 10:
+        sys.exit(f"\n  Only {len(ctrl_t)} usable control decays; cannot "
+                 "calibrate an empirical threshold.")
+
+    t_crit = float(np.quantile(ctrl_t, 1.0 - ALPHA_LEVEL))
+    ctrl_stats = {'t_crit': t_crit, 'ctrl_t': ctrl_t}
+    print(f"   Flag 2 threshold from {len(ctrl_t)} controls: t_crit = {t_crit:.3f}")
+    print(f"      control t: median {np.median(ctrl_t):+.3f} | "
+          f"min {ctrl_t.min():+.3f} | max {ctrl_t.max():+.3f}")
+        
     print("3. Evaluating Treatment Alphas (LLM Survivors)...")
     trt_results = []
     for col in trt_diffs.columns:
@@ -319,12 +329,7 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
         
     # Mann-Whitney U test between LLM Z-drops and Control Z-drops
     # (Controls must have their Z-drops calculated retrospectively now that r is known)
-    ctrl_z_drops = []
-    for c, r_dict in ctrl_results.items():
-        delta_c = max(r * r_dict['base_mean'], r * median_base_j)
-        z = (r_dict['drop_oos'] - delta_c) / r_dict['se_drop']
-        if np.isfinite(z): ctrl_z_drops.append(z)
-        
+    ctrl_z_drops = ctrl_t.tolist()
     llm_z_drops = out_df['z_drop'].dropna().tolist()
     
     mw_stat, mw_p = stats.mannwhitneyu(llm_z_drops, ctrl_z_drops, alternative='greater')
@@ -342,7 +347,7 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
     print("\n" + "=" * 72)
     print("V2 PIPELINE RESULTS")
     print("=" * 72)
-    cols = ['base_mean', 'oos_mean', 'drop_oos', 'delta', 'z_oos', 'p1',
+    cols = ['base_mean', 'oos_mean', 'drop_oos', 't_crit', 'z_oos', 'p1',
             'z_drop', 'p2', 'flag_1', 'flag_2', 'verdict']
     print(out_df[cols].to_string(float_format=lambda v: f"{v:.4f}"))
     print(f"\n   Flag 1 (rarity)      : {int(f1.sum())} / {len(out_df)}")
