@@ -1,6 +1,36 @@
-pandas
-numpy
-scipy
-pyarrow
-python-dotenv
-google-genai
+# ---------------------------------------------------------------------------
+# Core numerics — required by every stage of the pipeline.
+# ---------------------------------------------------------------------------
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+
+# ---------------------------------------------------------------------------
+# Data I/O.
+#   pyarrow    data/daily_ohlcv.parquet is read with engine="pyarrow" in
+#              phase1_evaluation.py and test2.py. Not optional.
+#   openpyxl   pandas needs it to read data/WSJ_Stock_Jumps.xlsx (test2.py
+#              reads two sheets: "jumps by day (wsj)" and "key_passages").
+#              Imported indirectly by pandas, so it never appears in an
+#              import statement — easy to omit by mistake.
+# ---------------------------------------------------------------------------
+pyarrow>=14.0
+openpyxl>=3.1
+
+# ---------------------------------------------------------------------------
+# Figures. test2.py writes diagnostic PNGs by default and catches ImportError
+# to degrade gracefully, so this is technically optional — but the run prints
+# a warning and produces no figures without it. Pass --no-plots to skip.
+# ---------------------------------------------------------------------------
+matplotlib>=3.7
+
+# ---------------------------------------------------------------------------
+# Alpha generation only (alph_gen_code_*.py). Not needed to REPRODUCE the
+# analysis from the committed alpha JSONs — only to regenerate them from the
+# provider APIs, which costs money and will not reproduce byte-for-byte.
+# Move these to requirements-generation.txt if you want a lean analysis install.
+# ---------------------------------------------------------------------------
+python-dotenv>=1.0
+anthropic>=0.40
+openai>=1.50
+google-genai>=0.3
