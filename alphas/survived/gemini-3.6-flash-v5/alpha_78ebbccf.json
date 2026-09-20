@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_78ebbccf",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 637367744,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mem",
+            "N_smooth",
+            "delta",
+            "eps"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-25T08:28:02.504790+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 1,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Standardized Liquidity Shock Reversal (SLSR)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_mem = 20` (Lookback window in days for time-series rolling mean and standard deviation of illiquidity)\n  - `N_smooth = 5` (Smoothing window in days for the liquidity-modulated return signal)\n  - `delta = 1e-8` (Positive constant added to dollar volume to prevent division by zero)\n  - `eps = 1e-6` (Positive constant added to standard deviations to prevent division by zero)\n- Required Inputs: `close`, `volume`, `returns`\n\n# Section 2: Mathematical Formulation\n\n1. Daily Dollar Volume ($DV_{i,t}$):\n$$DV_{i,t} = \\text{close}_{i,t} \\cdot \\text{volume}_{i,t}$$\n\n2. Amihud Illiquidity Ratio ($ILLIQ_{i,t}$):\n$$ILLIQ_{i,t} = \\frac{|\\text{returns}_{i,t}|}{DV_{i,t} + \\delta}$$\n\n3. Rolling Mean Illiquidity ($\\mu_{i,t}$):\n$$\\mu_{i,t} = \\frac{1}{N_{mem}} \\sum_{k=0}^{N_{mem}-1} ILLIQ_{i,t-k}$$\n\n4. Rolling Standard Deviation of Illiquidity ($\\sigma_{i,t}$):\n$$\\sigma_{i,t} = \\sqrt{\\frac{1}{N_{mem}-1} \\sum_{k=0}^{N_{mem}-1} \\left( ILLIQ_{i,t-k} - \\mu_{i,t} \\right)^2}$$\n\n5. Time-Series Standardized Illiquidity ($z_{i,t}$):\n$$z_{i,t} = \\frac{ILLIQ_{i,t} - \\mu_{i,t}}{\\sigma_{i,t} + \\epsilon}$$\n\n6. Liquidity-Modulated Return Interaction ($W_{i,t}$):\n$$W_{i,t} = z_{i,t} \\cdot \\text{returns}_{i,t}$$\n\n7. Smoothed Interaction Signal ($S_{i,t}$):\n$$S_{i,t} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} W_{i,t-k}$$\n\n8. Cross-Sectional Mean ($\\mu_{CS,t}$) and Standard Deviation ($\\sigma_{CS,t}$):\n$$\\mu_{CS,t} = \\frac{1}{M_t} \\sum_{i=1}^{M_t} S_{i,t}$$\n$$\\sigma_{CS,t} = \\sqrt{\\frac{1}{M_t - 1} \\sum_{i=1}^{M_t} \\left( S_{i,t} - \\mu_{CS,t} \\right)^2}$$\nwhere $M_t$ is the count of valid non-NaN symbol observations on date $t$.\n\n9. Final Alpha Signal ($\\alpha_{i,t}$):\n$$\\alpha_{i,t} = -\\left( \\frac{S_{i,t} - \\mu_{CS,t}}{\\sigma_{CS,t} + \\epsilon} \\right)$$\n\n10. Handling of Undefined Values:\n- Time-series rolling operations require a minimum observation count of $N_{mem}$ for $\\mu_{i,t}$ and $\\sigma_{i,t}$, and $N_{smooth}$ for $S_{i,t}$.\n- Division by zero is prevented by adding parameter $\\delta$ to dollar volume and parameter $\\epsilon$ to standard deviation denominators.\n- Any observation yielding NaN due to insufficient historical lookback or missing daily inputs is assigned a final signal value of $0.0$.\n\n# Section 3: Causal Rationale\n\nWhen market illiquidity spikes relative to its trailing historical baseline (measured via the Amihud illiquidity proxy), price changes are primarily driven by temporary order imbalance and market maker inventory constraints rather than fundamental news. Consequently, returns realized during abnormally illiquid conditions exhibit transient overshooting that systematic liquidity providers can exploit via mean-reversion. Conversely, returns occurring during highly liquid regimes reflect broad price discovery and informed order flow, exhibiting trend persistence. By taking the negative cross-sectional rank of the product between returns and standardized illiquidity, the strategy conditions positioning on market depth: shorting transient price surges on illiquid days, buying transient dips on illiquid days, and following momentum when liquidity is abundant.\n\n# Section 4: Structural Bounds\n\n- Point-in-Time Compliance: The model relies exclusively on Point-in-Time (PIT) daily market data (`close`, `volume`, `returns`) available at or before the market close on day $t$.\n- Execution Timing Rule: The alpha signal $\\alpha_{i,t}$ is calculated using data available up to the market close on day $t$, and portfolio positions are executed at the market OPEN on day $t+1$. The mathematical formulation outputs values aligned to day $t$ without future look-ahead.\n- Minimum Observation History: A total of $N_{mem} + N_{smooth} - 1 = 24$ consecutive trailing observation days per symbol are required before the signal produces non-zero values.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_mem=20, N_smooth=5, delta=1e-8, eps=1e-6):\n    dollar_vol = df['close'] * df['volume']\n    illiq = df['returns'].abs() / (dollar_vol + delta)\n\n    mu = illiq.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_mem, min_periods=N_mem).mean()\n    )\n    sigma = illiq.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_mem, min_periods=N_mem).std(ddof=1)\n    )\n\n    z = (illiq - mu) / (sigma + eps)\n    w = z * df['returns']\n\n    s = w.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    cs_mean = s.groupby(level='date').transform('mean')\n    cs_std = s.groupby(level='date').transform(lambda x: x.std(ddof=1))\n\n    alpha = -(s - cs_mean) / (cs_std + eps)\n    alpha = alpha.fillna(0.0)\n\n    return alpha\n```",
+    "response_sha256": "420e374a0772b9a596ef957c97a08d4eee377b2f0757b11651328c3dd7d3ed0f",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mem",
+            "N_smooth",
+            "delta",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "fillna"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 637367744,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1507,
+            "total_tokens": 9114
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

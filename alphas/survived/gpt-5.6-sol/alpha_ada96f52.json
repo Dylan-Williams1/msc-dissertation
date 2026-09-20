@@ -1,0 +1,98 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_ada96f52",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_base",
+            "N_smooth",
+            "N_xs"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-21T00:18:37.707862+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 14,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 338554449,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Dollar-Volume Liquidity Stress Reversal\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_base = 20`: trailing window used to estimate normal price impact\n  - `N_smooth = 3`: trailing window used to smooth normalized signed price impact\n  - `N_xs = 50`: minimum number of valid symbols required for cross-sectional ranking\n- **Required Inputs:** `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), define:\n\n- \\(C_{i,t}\\): closing price\n- \\(V_{i,t}\\): share volume\n- \\(r_{i,t}\\): supplied daily return\n- \\(D_{i,t}\\): closing-price dollar volume\n\n\\[\nD_{i,t}=C_{i,t}V_{i,t}.\n\\]\n\nDefine the absolute price-impact proxy:\n\n\\[\nI_{i,t}=\\frac{|r_{i,t}|}{D_{i,t}}.\n\\]\n\nUsing only observations strictly before day \\(t\\), estimate the symbol\u2019s normal price impact:\n\n\\[\nB_{i,t}\n=\n\\frac{1}{N_{\\text{base}}}\n\\sum_{j=1}^{N_{\\text{base}}} I_{i,t-j}.\n\\]\n\nThe normalized signed liquidity-stress score is:\n\n\\[\nQ_{i,t}\n=\n\\frac{r_{i,t}/D_{i,t}}{B_{i,t}}.\n\\]\n\nSmooth the score over the current and preceding observations:\n\n\\[\nM_{i,t}\n=\n\\frac{1}{N_{\\text{smooth}}}\n\\sum_{j=0}^{N_{\\text{smooth}}-1}Q_{i,t-j}.\n\\]\n\nFor each date \\(t\\), let \\(\\mathcal{U}_t\\) be the symbols with defined \\(M_{i,t}\\), and let \\(n_t=|\\mathcal{U}_t|\\). Define the average-tie cross-sectional percentile rank:\n\n\\[\nP_{i,t}\n=\n\\frac{\\operatorname{rank}_{\\mathcal{U}_t}(M_{i,t})}{n_t}.\n\\]\n\nThe alpha is the negative demeaned percentile rank:\n\n\\[\n\\alpha_{i,t}\n=\n-\\left(\nP_{i,t}\n-\n\\frac{1}{n_t}\\sum_{k\\in\\mathcal{U}_t}P_{k,t}\n\\right).\n\\]\n\nThus, unusually negative signed price impact produces positive alpha, while unusually positive signed price impact produces negative alpha.\n\nA rolling baseline is defined only when all `N_base` observations in the immediately preceding fixed window are valid. The smoothed score is defined only when all `N_smooth` raw scores in its fixed trailing window are valid. If \\(D_{i,t}\\leq 0\\), \\(B_{i,t}\\leq 0\\), or any required input is missing, the affected value is undefined; no imputation, clipping, or alternative division rule is applied. Missing values are excluded from cross-sectional ranks, and the entire cross-section is undefined when fewer than `N_xs` valid symbols are available.\n\n## Section 3: Causal Rationale\n\nAbsolute return per dollar of trading volume is an OHLCV-observable proxy for the price movement associated with a unit of traded liquidity. A large signed return relative to both current dollar volume and the symbol\u2019s trailing price-impact baseline identifies an unusually liquidity-sensitive price move. Such moves can reflect temporary price pressure when available trading volume is insufficient to absorb demand or supply without a disproportionate price change. The alpha takes the opposite side of this pressure and averages several daily observations to reduce dependence on a single noisy close.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time daily `close`, `volume`, and `returns` data drawn from the permitted PIT OHLCV dataset. The signal for day \\(t\\) is generated after the market close using only data available through the close of day \\(t\\), and execution occurs at the open of day \\(t+1\\); the formulation complies with this fixed timing rule. No future observations or negative shifts are used.\n\nA symbol requires at least\n\n\\[\nN_{\\text{base}}+N_{\\text{smooth}}\n\\]\n\ntrailing observations including day \\(t\\) before its signal can be defined. With the defaults, this is \\(20+3=23\\) observations. In addition, at least `N_xs = 50` symbols must have valid smoothed scores on that date.\n\n## Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\ndef generate_alpha(df, N_base=20, N_smooth=3, N_xs=50):\n    work = df.sort_index(level=[\"symbol\", \"date\"])\n\n    dollar_volume = work[\"close\"] * work[\"volume\"]\n    valid_dollar_volume = dollar_volume.where(dollar_volume > 0)\n\n    impact = work[\"returns\"].abs() / valid_dollar_volume\n    lagged_impact = impact.groupby(level=\"symbol\").shift(1)\n\n    baseline = (\n        lagged_impact.groupby(level=\"symbol\")\n        .rolling(window=N_base, min_periods=N_base)\n        .mean()\n        .droplevel(0)\n    )\n    baseline = baseline.where(baseline > 0)\n\n    raw_score = (work[\"returns\"] / valid_dollar_volume) / baseline\n\n    smoothed_score = (\n        raw_score.groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n    )\n\n    percentile_rank = smoothed_score.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True\n    )\n    rank_mean = percentile_rank.groupby(level=\"date\").transform(\"mean\")\n    valid_count = smoothed_score.groupby(level=\"date\").transform(\"count\")\n\n    alpha = -(percentile_rank - rank_mean)\n    alpha = alpha.where(valid_count >= N_xs)\n\n    return alpha.reindex(df.index).rename(\"alpha\")\n```",
+    "response_sha256": "d25dc32b72ec0f762614fcaa6a2862cad2be63db1c5b2a6f4c911785940c236a",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_base",
+            "N_smooth",
+            "N_xs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 3762,
+            "total_tokens": 4758
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

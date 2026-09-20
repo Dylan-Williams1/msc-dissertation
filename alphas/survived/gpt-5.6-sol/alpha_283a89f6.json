@@ -1,0 +1,106 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_283a89f6",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_liq",
+            "N_risk",
+            "N_smooth",
+            "Z_cap",
+            "ddof_risk"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-21T00:16:44.578000+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 12,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1721698274,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "```python\n# Section 1: Alpha Specification\n# Formula Name: Dollar-Volume Drought Reversal\n# Holding Period: 3 trading days\n# Orientation: Long/Short\n# Parameters:\n#   N_liq = 20        (trailing dollar-volume baseline window)\n#   N_risk = 20       (trailing return-volatility window)\n#   N_smooth = 3      (signal smoothing window)\n#   Z_cap = 5.0       (absolute cap on the standardized return)\n#   ddof_risk = 1     (degrees-of-freedom adjustment for return volatility)\n# Required Inputs: close, volume, returns\n# Parameter constraints:\n#   N_liq >= 1, N_smooth >= 1, N_risk > ddof_risk >= 0, and Z_cap > 0.\n\n# Section 2: Mathematical Formulation\n# For symbol i on trading day t, let C_{i,t}, V_{i,t}, and r_{i,t} denote\n# close, volume, and returns. Define dollar volume:\n#   \\(Q_{i,t} = C_{i,t}V_{i,t}\\).\n#\n# Using only observations before day t, define the liquidity baseline:\n#   \\(B_{i,t} =\n#       \\operatorname{median}\\{Q_{i,t-k}:k=1,\\ldots,N_{\\mathrm{liq}}\\}\\).\n#\n# The dollar-volume drought is:\n#   \\(D_{i,t} =\n#       \\max\\left(0,1-\\frac{Q_{i,t}}{B_{i,t}}\\right)\\).\n#\n# Define the prior-return mean:\n#   \\(\\bar r_{i,t} =\n#       \\frac{1}{N_{\\mathrm{risk}}}\n#       \\sum_{k=1}^{N_{\\mathrm{risk}}}r_{i,t-k}\\).\n#\n# Define prior-return volatility:\n#   \\(\\sigma_{i,t} =\n#       \\sqrt{\\frac{\n#       \\sum_{k=1}^{N_{\\mathrm{risk}}}\n#       (r_{i,t-k}-\\bar r_{i,t})^2}\n#       {N_{\\mathrm{risk}}-\\mathrm{ddof}_{\\mathrm{risk}}}}\\).\n#\n# The capped standardized current return is:\n#   \\(Z_{i,t} =\n#       \\min\\left(Z_{\\mathrm{cap}},\n#       \\max\\left(-Z_{\\mathrm{cap}},\n#       \\frac{r_{i,t}}{\\sigma_{i,t}}\\right)\\right)\\).\n#\n# The unsmoothed reversal score is:\n#   \\(U_{i,t}=-Z_{i,t}D_{i,t}\\).\n#\n# The final alpha is:\n#   \\(A_{i,t} =\n#       \\frac{1}{N_{\\mathrm{smooth}}}\n#       \\sum_{k=0}^{N_{\\mathrm{smooth}}-1}U_{i,t-k}\\).\n#\n# Each rolling window requires exactly its declared number of valid\n# observations. B_{i,t} is undefined unless all N_liq prior dollar-volume\n# observations are valid and B_{i,t}>0. Sigma_{i,t} is undefined unless all\n# N_risk prior returns are valid and sigma_{i,t}>0. Q_{i,t} is invalid when\n# close is nonfinite or nonpositive, or volume is nonfinite or negative.\n# Returns must be finite. All nonfinite or invalid inputs are treated as\n# missing, no missing values are imputed, and missing observations are not\n# bridged by reduced minimum-period windows. Division by zero produces an\n# undefined signal rather than an imputed value. The final smoothing window\n# requires N_smooth valid consecutive unsmoothed scores.\n\n# Section 3: Causal Rationale\n# Dollar volume is an OHLCV-observable proxy for the amount of capital\n# available to absorb trading demand. A sharp decline in current dollar\n# volume relative to its trailing baseline indicates a liquidity drought in\n# which a return shock can have unusually large temporary price impact.\n# Reversing the volatility-standardized return targets subsequent correction\n# of that impact, while multiplying by the drought magnitude suppresses the\n# signal when observed liquidity is normal. Smoothing represents staggered\n# exposure to liquidity-driven dislocations over several trading days.\n\n# Section 4: Structural Bounds\n# The formulation relies solely on Point-in-Time (PIT) daily OHLCV and returns\n# data. The signal for day t is generated after the market close using only\n# data available through that close and is executed at the OPEN of day t+1;\n# the formulation complies because every operation at t uses current or\n# trailing data and never future data. The implementation returns the\n# close-of-day-t signal without applying an execution lag.\n# A symbol requires at least\n#   max(N_liq, N_risk) + N_smooth\n# consecutive valid trailing observations, including day t, before its first\n# final signal is defined. Each (date, symbol) index pair must be unique.\n\n# Section 5: Python Implementation\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(\n    df,\n    N_liq=20,\n    N_risk=20,\n    N_smooth=3,\n    Z_cap=5.0,\n    ddof_risk=1,\n):\n    original_index = df.index\n    df = df.sort_index()\n\n    close = df[\"close\"].where(\n        np.isfinite(df[\"close\"]) & df[\"close\"].gt(0.0)\n    )\n    volume = df[\"volume\"].where(\n        np.isfinite(df[\"volume\"]) & df[\"volume\"].ge(0.0)\n    )\n    returns = df[\"returns\"].where(np.isfinite(df[\"returns\"]))\n\n    dollar_volume = close * volume\n\n    lagged_dollar_volume = dollar_volume.groupby(\n        level=\"symbol\"\n    ).shift(1)\n    liquidity_baseline = (\n        lagged_dollar_volume.groupby(level=\"symbol\")\n        .rolling(window=N_liq, min_periods=N_liq)\n        .median()\n        .droplevel(0)\n        .reindex(df.index)\n    )\n\n    liquidity_drought = (\n        1.0 - dollar_volume / liquidity_baseline.where(\n            liquidity_baseline.gt(0.0)\n        )\n    ).clip(lower=0.0)\n\n    lagged_returns = df.groupby(level=\"symbol\")[\"returns\"].shift(1)\n    lagged_returns = lagged_returns.where(np.isfinite(lagged_returns))\n\n    prior_volatility = (\n        lagged_returns.groupby(level=\"symbol\")\n        .rolling(\n            window=N_risk,\n            min_periods=N_risk,\n        )\n        .std(ddof=ddof_risk)\n        .droplevel(0)\n        .reindex(df.index)\n    )\n\n    standardized_return = returns / prior_volatility.where(\n        prior_volatility.gt(0.0)\n    )\n    capped_return = standardized_return.clip(\n        lower=-Z_cap,\n        upper=Z_cap,\n    )\n\n    unsmoothed_signal = -capped_return * liquidity_drought\n\n    alpha = (\n        unsmoothed_signal.groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n        .reindex(df.index)\n    )\n\n    return alpha.reindex(original_index)\n```",
+    "response_sha256": "dda2ee6f68b52f8f6cf2e169fb63b3233e1239f39debfc0e5ee049d421b0c4ad",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_liq",
+            "N_risk",
+            "N_smooth",
+            "Z_cap",
+            "ddof_risk"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [
+            "cap"
+        ],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 5359,
+            "total_tokens": 6355
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

@@ -1,0 +1,100 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_0b7a9845",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_range",
+            "N_vol",
+            "N_cs"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-21T00:06:32.174135+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 4,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1155802903,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Low-Participation Range-Scaled Short-Term Reversal\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_rev = 3`: short-term return lookback\n  - `N_range = 20`: average intraday-range lookback\n  - `N_vol = 20`: average-volume lookback\n  - `N_cs = 50`: minimum valid symbols required for each cross-sectional rank\n- **Required Inputs:** `high`, `low`, `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on day \\(t\\), let \\(H_{i,t}\\), \\(L_{i,t}\\), \\(C_{i,t}\\), \\(V_{i,t}\\), and \\(r_{i,t}\\) denote daily high, low, close, volume, and the supplied close-to-close simple return.\n\nDefine the short-term return displacement:\n\n\\[\nM_{i,t}\n=\n\\sum_{k=0}^{N_{\\mathrm{rev}}-1} r_{i,t-k}.\n\\]\n\nDefine the daily range relative to close:\n\n\\[\nQ_{i,t}\n=\n\\frac{H_{i,t}-L_{i,t}}{C_{i,t}},\n\\]\n\nand its trailing average:\n\n\\[\n\\overline{Q}_{i,t}\n=\n\\frac{1}{N_{\\mathrm{range}}}\n\\sum_{k=0}^{N_{\\mathrm{range}}-1} Q_{i,t-k}.\n\\]\n\nThe range-scaled displacement is:\n\n\\[\nD_{i,t}\n=\n\\frac{M_{i,t}}{\\overline{Q}_{i,t}}.\n\\]\n\nDefine trailing average volume and relative volume:\n\n\\[\n\\overline{V}_{i,t}\n=\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=0}^{N_{\\mathrm{vol}}-1} V_{i,t-k},\n\\qquad\nU_{i,t}\n=\n\\frac{V_{i,t}}{\\overline{V}_{i,t}}.\n\\]\n\nFor any variable \\(X_{i,t}\\), define\n\n\\[\nP_t(X_{i,t})\n\\]\n\nas its cross-sectional percentile rank on date \\(t\\), calculated as the average ordinal rank for ties divided by the number of valid symbols. It is defined only when at least \\(N_{\\mathrm{cs}}\\) symbols have valid values.\n\nConstruct the raw reversal score:\n\n\\[\nA^{\\mathrm{raw}}_{i,t}\n=\n\\left(\\frac{1}{2}-P_t(D_{i,t})\\right)\n\\left(1-P_t(U_{i,t})\\right).\n\\]\n\nThe final alpha is the centered cross-sectional percentile rank:\n\n\\[\n\\alpha_{i,t}\n=\nP_t\\!\\left(A^{\\mathrm{raw}}_{i,t}\\right)-\\frac{1}{2}.\n\\]\n\nEach rolling calculation requires all observations in its stated window: `min_periods` equals the corresponding window parameter. Missing or non-finite input observations are treated as undefined, without imputation. \\(Q_{i,t}\\) is undefined when \\(C_{i,t}=0\\); \\(D_{i,t}\\) is undefined when \\(\\overline{Q}_{i,t}=0\\); and \\(U_{i,t}\\) is undefined when \\(\\overline{V}_{i,t}=0\\). Any non-finite derived value is also treated as undefined. Cross-sectional ranks ignore undefined values, and the final signal is undefined unless at least \\(N_{\\mathrm{cs}}\\) valid raw scores exist on that date.\n\n## Section 3: Causal Rationale\n\nA large recent return relative to the symbol\u2019s typical daily high-low range identifies an unusually extended short-term price displacement. Such displacements can partially reverse when the initiating liquidity imbalance dissipates and prices move back toward levels prevailing before the shock. Relative volume is an observable OHLCV proxy for the amount of trading participation accompanying the move, so the signal gives greater weight to displacements occurring on unusually low volume. Cross-sectional ranking makes the strategy buy the most negatively displaced low-participation symbols and short the corresponding positively displaced symbols.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time daily OHLCV and returns data. The signal for day \\(t\\) uses only information available through the market close on day \\(t\\), and execution occurs at the open of day \\(t+1\\); the formulation complies with this rule and contains no forward shifts. The minimum trailing history is\n\n\\[\n\\max(N_{\\mathrm{rev}},N_{\\mathrm{range}},N_{\\mathrm{vol}})=20\n\\]\n\nvalid symbol observations, subject to each individual rolling window\u2019s full-observation requirement. In addition, at least \\(N_{\\mathrm{cs}}=50\\) valid symbols must be available on date \\(t\\) for the cross-sectional signal to be defined.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(df, N_rev=3, N_range=20, N_vol=20, N_cs=50):\n    import numpy as np\n    import pandas as pd\n\n    work = df.sort_index(level=[\"symbol\", \"date\"])\n\n    high = work[\"high\"].where(np.isfinite(work[\"high\"]))\n    low = work[\"low\"].where(np.isfinite(work[\"low\"]))\n    close = work[\"close\"].where(np.isfinite(work[\"close\"]))\n    volume = work[\"volume\"].where(np.isfinite(work[\"volume\"]))\n    returns = work[\"returns\"].where(np.isfinite(work[\"returns\"]))\n\n    short_return = (\n        returns.groupby(level=\"symbol\")\n        .rolling(window=N_rev, min_periods=N_rev)\n        .sum()\n        .reset_index(level=0, drop=True)\n    )\n\n    range_fraction = ((high - low) / close).where(close.ne(0))\n    range_fraction = range_fraction.where(np.isfinite(range_fraction))\n\n    average_range = (\n        range_fraction.groupby(level=\"symbol\")\n        .rolling(window=N_range, min_periods=N_range)\n        .mean()\n        .reset_index(level=0, drop=True)\n    )\n\n    scaled_displacement = (short_return / average_range).where(\n        average_range.ne(0)\n    )\n    scaled_displacement = scaled_displacement.where(\n        np.isfinite(scaled_displacement)\n    )\n\n    average_volume = (\n        volume.groupby(level=\"symbol\")\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .reset_index(level=0, drop=True)\n    )\n\n    relative_volume = (volume / average_volume).where(average_volume.ne(0))\n    relative_volume = relative_volume.where(np.isfinite(relative_volume))\n\n    displacement_count = scaled_displacement.groupby(\n        level=\"date\"\n    ).transform(\"count\")\n    volume_count = relative_volume.groupby(level=\"date\").transform(\"count\")\n\n    displacement_rank = (\n        scaled_displacement.groupby(level=\"date\")\n        .rank(method=\"average\", pct=True)\n        .where(displacement_count.ge(N_cs))\n    )\n    volume_rank = (\n        relative_volume.groupby(level=\"date\")\n        .rank(method=\"average\", pct=True)\n        .where(volume_count.ge(N_cs))\n    )\n\n    raw_alpha = (0.5 - displacement_rank) * (1.0 - volume_rank)\n    raw_count = raw_alpha.groupby(level=\"date\").transform(\"count\")\n\n    alpha = (\n        raw_alpha.groupby(level=\"date\")\n        .rank(method=\"average\", pct=True)\n        .sub(0.5)\n        .where(raw_count.ge(N_cs))\n    )\n\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "be9bae15d9dfff7a629e2b6149430c72210105984893ceb4c819b3f43bcefe66",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_range",
+            "N_vol",
+            "N_cs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 998,
+            "output_tokens": 4661,
+            "total_tokens": 5659
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

@@ -1,0 +1,105 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_f8ee3701",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_vol",
+            "N_dvol",
+            "N_range",
+            "N_smooth",
+            "MIN_OBS_FRAC",
+            "EPS",
+            "WINSOR_Z"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-20T23:33:50.379531+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 4,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1155802903,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Illiquidity-Scaled Intraday-Absorption Reversal (ISAR)\n- **Holding Period:** 5 trading days (signal recomputed daily; expected turnover consistent with a ~5-day horizon)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral (rank-demeaned)\n- **Parameters:**\n  - `N_rev = 5` \u2014 lookback (days) for the cumulative short-term return being reversed\n  - `N_vol = 20` \u2014 lookback (days) for realized volatility used to normalise the reversal return\n  - `N_dvol = 20` \u2014 lookback (days) for median dollar volume used in the illiquidity weight\n  - `N_range = 20` \u2014 lookback (days) for the average normalised intraday range (absorption proxy)\n  - `N_smooth = 3` \u2014 smoothing span (days, simple moving average) applied to the raw combined signal\n  - `MIN_OBS_FRAC = 1.0` \u2014 fraction of each rolling window required as minimum non-missing observations (1.0 = full window)\n  - `EPS = 1e-12` \u2014 floor added to denominators to avoid division by zero\n  - `WINSOR_Z = 3.0` \u2014 absolute cap applied to the volatility-normalised reversal return\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns`\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities on day $t$ use only data up to and including the close of day $t$.\n\n**Step 1 \u2014 Short-horizon cumulative return.**\n\n$$\nR_{i,t}^{(N_{rev})} \\;=\\; \\prod_{k=0}^{N_{rev}-1}\\bigl(1 + r_{i,t-k}\\bigr) \\;-\\; 1\n$$\n\nwhere $r_{i,t}$ is the daily `returns` field.\n\n**Step 2 \u2014 Realized volatility scaling.**\n\n$$\n\\sigma_{i,t} \\;=\\; \\sqrt{\\frac{1}{N_{vol}-1}\\sum_{k=0}^{N_{vol}-1}\\bigl(r_{i,t-k}-\\bar r_{i,t}\\bigr)^{2}},\n\\qquad\n\\bar r_{i,t}=\\frac{1}{N_{vol}}\\sum_{k=0}^{N_{vol}-1} r_{i,t-k}\n$$\n\nThe volatility-normalised (per-day-equivalent) reversal input, winsorised at $\\pm$ `WINSOR_Z`:\n\n$$\nz_{i,t} \\;=\\; \\operatorname{clip}\\!\\left(\\frac{R_{i,t}^{(N_{rev})}}{\\sigma_{i,t}\\sqrt{N_{rev}} \\;+\\; \\texttt{EPS}},\\; -\\texttt{WINSOR\\_Z},\\; +\\texttt{WINSOR\\_Z}\\right)\n$$\n\n**Step 3 \u2014 Intraday absorption proxy (how much price range the market clears per day).**\n\nDaily normalised range:\n\n$$\ng_{i,t} \\;=\\; \\frac{h_{i,t}-l_{i,t}}{c_{i,t} + \\texttt{EPS}}\n$$\n\nwith $h,l,c$ the daily high, low, close. Its trailing mean:\n\n$$\nG_{i,t} \\;=\\; \\frac{1}{N_{range}}\\sum_{k=0}^{N_{range}-1} g_{i,t-k}\n$$\n\n**Step 4 \u2014 Illiquidity weight (Amihud-style, OHLCV-only).**\n\nDollar volume $d_{i,t} = c_{i,t}\\cdot v_{i,t}$; trailing median\n\n$$\nD_{i,t} \\;=\\; \\operatorname{median}\\bigl(d_{i,t-N_{dvol}+1},\\dots,d_{i,t}\\bigr)\n$$\n\nIlliquidity proxy:\n\n$$\nA_{i,t} \\;=\\; \\frac{G_{i,t}}{\\log\\bigl(1 + D_{i,t}\\bigr) + \\texttt{EPS}}\n$$\n\n**Step 5 \u2014 Cross-sectional standardisation of the weight.** On each date $t$, over the cross-section $\\mathcal{S}_t$ of symbols with all inputs defined:\n\n$$\nu_{i,t} \\;=\\; \\operatorname{rank}_{j\\in\\mathcal{S}_t}\\bigl(A_{j,t}\\bigr)\\Big/\\bigl(|\\mathcal{S}_t|+1\\bigr) \\;\\in\\;(0,1)\n$$\n\n(ranks are ascending, ties averaged). The reversal amplification weight is\n\n$$\nw_{i,t} \\;=\\; 0.5 \\;+\\; u_{i,t} \\;\\in\\;(0.5,\\,1.5)\n$$\n\nso that more illiquid / higher-range names receive up to three times the weight of the most liquid / smoothest names, and no weight is negative.\n\n**Step 6 \u2014 Raw signal (reversal: negative sign on past return).**\n\n$$\ns_{i,t} \\;=\\; -\\,w_{i,t}\\cdot z_{i,t}\n$$\n\n**Step 7 \u2014 Temporal smoothing.**\n\n$$\n\\tilde s_{i,t} \\;=\\; \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} s_{i,t-k}\n$$\n\n**Step 8 \u2014 Final cross-sectional neutralisation.** On each date $t$, over symbols with $\\tilde s_{i,t}$ defined:\n\n$$\n\\alpha_{i,t} \\;=\\; \\frac{\\operatorname{rank}_{j\\in\\mathcal{S}_t}\\bigl(\\tilde s_{j,t}\\bigr)}{|\\mathcal{S}_t|+1} \\;-\\; \\frac{1}{|\\mathcal{S}_t|}\\sum_{j\\in\\mathcal{S}_t}\\frac{\\operatorname{rank}\\bigl(\\tilde s_{j,t}\\bigr)}{|\\mathcal{S}_t|+1}\n$$\n\ni.e. the cross-sectional percentile rank of the smoothed signal, demeaned to sum to zero each day. Positive $\\alpha$ = long, negative = short.\n\n**Handling of undefined values (explicit):**\n- Every rolling window (`N_rev`, `N_vol`, `N_dvol`, `N_range`, `N_smooth`) requires `min_periods` equal to $\\lceil$ `MIN_OBS_FRAC` $\\times$ window $\\rceil$; with the default `MIN_OBS_FRAC = 1.0` this is the full window. Where insufficient observations exist, the quantity is undefined (NaN) and the symbol is excluded from that day's cross-section.\n- All divisions add `EPS` to the denominator; no other division-by-zero handling is applied.\n- $z_{i,t}$ is winsorised at $\\pm$ `WINSOR_Z`; no other clipping is applied.\n- Missing input observations propagate as NaN; no imputation or forward-filling is performed. Cross-sectional ranks and means on date $t$ are computed over non-missing values only.\n- If a date has fewer than 2 valid symbols the demeaned output for that date is defined but carries no cross-sectional information; no special handling is imposed.\n\n# Section 3: Causal Rationale\n\nShort-horizon price moves in individual equities are partly compensation paid to liquidity providers who absorb one-sided demand, and that compensation is mechanically reversed once the demand imbalance clears, producing the well-documented multi-day reversal in cross-sectional returns. The magnitude of the compensation \u2014 and therefore the size of the subsequent reversal \u2014 should scale with how costly it is to absorb an order, so the signal amplifies the reversal in names whose trailing normalised high-low range is wide relative to their trailing dollar volume, a purely OHLCV Amihud-style price-impact proxy. Dividing the cumulative `N_rev`-day return by trailing realized volatility puts high- and low-volatility names on a comparable scale, so the ranking reflects the abnormality of the move rather than the name's baseline noise level, and winsorisation prevents genuine information events (which are less likely to revert) from dominating the extremes. Ranking cross-sectionally and demeaning removes the market-wide component, so the position expresses relative dislocation rather than a directional bet on index drift. Smoothing the raw signal over `N_smooth` days recognises that liquidity provision unwinds gradually and reduces the fraction of the position that is driven by a single day's noisy close.\n\n# Section 4: Structural Bounds\n\n- **Data:** The strategy uses exclusively point-in-time daily OHLCV and daily returns. No fundamentals, no analyst data, no index membership, no corporate-action or restatement-sensitive fields are used. Prices/volumes are assumed to be as-reported and split/dividend-adjusted on a PIT basis; no forward-looking adjustment factor is applied.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is computed using data available up to and including the market close on day $t$, and the resulting target position is executed at the **OPEN of day $t+1$**. The formulation complies: every rolling window in Section 2 is backward-looking and terminates at index $t$; no term references $t+1$ or later, and no negative shifts are used. The implementation returns the series aligned to date $t$; the one-day execution lag is applied by the backtest harness, not inside the function.\n- **Minimum trailing observations per symbol:** The binding chain is `N_smooth - 1` days of smoothing applied on top of the longest input window. With defaults, the longest input window is $\\max($`N_vol`, `N_dvol`, `N_range`, `N_rev`$) = 20$ days, so the first defined signal requires\n\n  $$\\max(N_{rev},N_{vol},N_{dvol},N_{range}) + N_{smooth} - 1 = 20 + 3 - 1 = \\mathbf{22}\\ \\text{trailing daily observations}$$\n\n  for that symbol. Symbols with fewer observations produce NaN and are excluded from that day's cross-section.\n- **Other bounds:** The alpha is cross-sectionally demeaned each day and is therefore dollar-neutral by construction, but is not beta-, sector-, or size-neutral; residual exposures to those factors are not controlled by this specification. The illiquidity weight tilts gross exposure toward less liquid names, so realised capacity is limited and the strategy is sensitive to trading costs; no cost model is included here. Symbols with zero or missing volume produce NaN inputs and drop out. A minimum cross-section of at least 2 valid symbols on a date is required for the demeaning to be meaningful.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_rev=5,\n                   N_vol=20,\n                   N_dvol=20,\n                   N_range=20,\n                   N_smooth=3,\n                   MIN_OBS_FRAC=1.0,\n                   EPS=1e-12,\n                   WINSOR_Z=3.0):\n\n    data = df.sort_index()\n\n    mp_rev = int(np.ceil(MIN_OBS_FRAC * N_rev))\n    mp_vol = int(np.ceil(MIN_OBS_FRAC * N_vol))\n    mp_dvol = int(np.ceil(MIN_OBS_FRAC * N_dvol))\n    mp_range = int(np.ceil(MIN_OBS_FRAC * N_range))\n    mp_smooth = int(np.ceil(MIN_OBS_FRAC * N_smooth))\n\n    g_sym = data.groupby(level='symbol')\n\n    log1p_ret = np.log1p(data['returns'])\n    cum_log = log1p_ret.groupby(level='symbol').rolling(\n        window=N_rev, min_periods=mp_rev).sum().reset_index(level=0, drop=True)\n    R = np.expm1(cum_log)\n\n    sigma = data['returns'].groupby(level='symbol').rolling(\n        window=N_vol, min_periods=mp_vol).std(ddof=1).reset_index(level=0, drop=True)\n\n    z = R / (sigma * np.sqrt(N_rev) + EPS)\n    z = z.clip(lower=-WINSOR_Z, upper=WINSOR_Z)\n\n    g = (data['high'] - data['low']) / (data['close'] + EPS)\n    G = g.groupby(level='symbol').rolling(\n        window=N_range, min_periods=mp_range).mean().reset_index(level=0, drop=True)\n\n    dollar_vol = data['close'] * data['volume']\n    D = dollar_vol.groupby(level='symbol').rolling(\n        window=N_dvol, min_periods=mp_dvol).median().reset_index(level=0, drop=True)\n\n    A = G / (np.log1p(D) + EPS)\n\n    n_valid_A = A.groupby(level='date').transform('count')\n    u = A.groupby(level='date').rank(method='average', ascending=True) / (n_valid_A + 1.0)\n    w = 0.5 + u\n\n    s = -(w * z)\n\n    s_smooth = s.groupby(level='symbol').rolling(\n        window=N_smooth, min_periods=mp_smooth).mean().reset_index(level=0, drop=True)\n\n    n_valid_s = s_smooth.groupby(level='date').transform('count')\n    pct_rank = s_smooth.groupby(level='date').rank(method='average', ascending=True) / (n_valid_s + 1.0)\n    alpha = pct_rank - pct_rank.groupby(level='date').transform('mean')\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n\n    return alpha\n```",
+    "response_sha256": "0b1a7dac6828a337a4749da13c8fc2a11ae61a7e79cfe033827de02ecf2ca2b5",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_vol",
+            "N_dvol",
+            "N_range",
+            "N_smooth",
+            "MIN_OBS_FRAC",
+            "EPS",
+            "WINSOR_Z"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1627,
+            "output_tokens": 4745,
+            "total_tokens": 6372
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

@@ -1,0 +1,79 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_c1754043",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1312298517,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_vol",
+            "min_obs"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-24T18:27:49.615568+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 3,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volume-Weighted Volatility-Adjusted Reversal (VWVAR)\n- Holding Period: 2 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_rev = 3`: Lookback window in trading days for computing short-term cumulative price return.\n  - `N_vol = 20`: Lookback window in trading days for calculating rolling historical return volatility and rolling average volume.\n  - `min_obs = 20`: Minimum required trailing observations for time-series rolling calculations.\n- Required Inputs: `close`, `returns`, `volume`\n\n# Section 2: Mathematical Formulation\n\nLet $C_{i,t}$, $r_{i,t}$, and $V_{i,t}$ denote the close price, daily return, and trading volume for symbol $i$ on trading day $t$, respectively.\n\n1. Short-Term Cumulative Return ($R_{i,t}^{(N_{rev})}$):\n   $$R_{i,t}^{(N_{rev})} = \\frac{C_{i,t}}{C_{i,t - N_{rev}}} - 1$$\n\n2. Rolling Return Volatility ($\\sigma_{i,t}$):\n   $$\\bar{r}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} r_{i,t-k}$$\n   $$\\sigma_{i,t} = \\sqrt{\\frac{1}{N_{vol} - 1} \\sum_{k=0}^{N_{vol}-1} \\left( r_{i,t-k} - \\bar{r}_{i,t} \\right)^2}$$\n\n3. Rolling Baseline Volume ($\\bar{V}_{i,t}$):\n   $$\\bar{V}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} V_{i,t-k}$$\n\n4. Relative Volume Ratio ($VR_{i,t}$):\n   $$VR_{i,t} = \\frac{V_{i,t}}{\\bar{V}_{i,t}}$$\n\n5. Volatility-Adjusted Short-Term Price Stretch ($S_{i,t}$):\n   $$S_{i,t} = \\frac{R_{i,t}^{(N_{rev})}}{\\sigma_{i,t} \\cdot \\sqrt{N_{rev}}}$$\n\n6. Raw Reversal Signal ($\\alpha_{raw, i, t}$):\n   $$\\alpha_{raw, i, t} = - S_{i,t} \\cdot VR_{i,t}$$\n\n7. Cross-Sectional Normalization ($\\alpha_{i,t}$):\n   $$\\mu_t(\\alpha_{raw}) = \\frac{1}{M_t} \\sum_{j=1}^{M_t} \\alpha_{raw, j, t}$$\n   $$\\sigma_t(\\alpha_{raw}) = \\sqrt{\\frac{1}{M_t - 1} \\sum_{j=1}^{M_t} \\left(\\alpha_{raw, j, t} - \\mu_t(\\alpha_{raw})\\right)^2}$$\n   $$\\alpha_{i,t} = \\frac{\\alpha_{raw, i, t} - \\mu_t(\\alpha_{raw})}{\\sigma_t(\\alpha_{raw})}$$\n   where $M_t$ is the number of valid non-NaN observations across symbols on date $t$.\n\nUndefined Value Handling:\n- Rolling calculations for $\\sigma_{i,t}$ and $\\bar{V}_{i,t}$ require a minimum of `min_obs` valid consecutive trailing observations. If fewer than `min_obs` observations are available, the outputs evaluate to NaN.\n- If $C_{i,t - N_{rev}}$, $\\sigma_{i,t}$, $\\bar{V}_{i,t}$, or $\\sigma_t(\\alpha_{raw})$ equals zero or is undefined, the resulting quotient is set to NaN.\n- Any infinite values resulting from zero-division are replaced with NaN prior to cross-sectional operations. Missing observations (NaN) are excluded from cross-sectional mean and standard deviation computations.\n\n# Section 3: Causal Rationale\n\nShort-term price reversals in daily US equities are primarily driven by transient liquidity shocks and temporary order imbalance pressures rather than fundamental revaluations. When an equity experiences a multi-day return move that is large relative to its baseline volatility, market makers and liquidity providers absorb the order flow by demanding temporary price concessions. Elevated trading volume during this window signals high immediate buying or selling intensity, amplifying the price impact and leading to short-term overshooting. As liquidity provision normalizes over subsequent sessions, prices systematically mean-revert toward their pre-shock baseline. Scaling the volatility-standardized return stretch by relative volume isolates high-impact liquidity dislocations from low-volume noise, improving signal signal-to-noise ratio.\n\n# Section 4: Structural Bounds\n\n- Point-in-Time Data Confirmation: The signal relies strictly on Point-in-Time daily OHLCV data. All inputs available at date $t$ reflect information known up to the market close on date $t$.\n- Execution Timing Rule: The signal $\\alpha_{i,t}$ is computed at the close of trading day $t$ and executed at the OPEN of trading day $t+1$. The mathematical formulation contains no forward-looking data and does not apply execution shifts internally.\n- Minimum Required Observations: A minimum of `min_obs = 20` trailing trading days of valid daily returns and volume data is required before the signal produces a defined output for any given symbol.\n\n# Section 5: Python Implementation\n\n```python\nimport pandas as pd\nimport numpy as np\n\ndef generate_alpha(df, N_rev=3, N_vol=20, min_obs=20):\n    close_lag = df.groupby(level='symbol')['close'].shift(N_rev)\n    cum_ret = (df['close'] / close_lag) - 1.0\n    \n    volatility = df.groupby(level='symbol')['returns'].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=min_obs).std(ddof=1)\n    )\n    \n    vol_mean = df.groupby(level='symbol')['volume'].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=min_obs).mean()\n    )\n    \n    vr = df['volume'] / vol_mean\n    stretch = cum_ret / (volatility * np.sqrt(N_rev))\n    \n    alpha_raw = - stretch * vr\n    alpha_raw = alpha_raw.replace([np.inf, -np.inf], np.nan)\n    \n    mean_cs = alpha_raw.groupby(level='date').transform('mean')\n    std_cs = alpha_raw.groupby(level='date').transform('std')\n    \n    alpha = (alpha_raw - mean_cs) / std_cs\n    alpha = alpha.replace([np.inf, -np.inf], np.nan)\n    \n    return alpha\n```",
+    "response_sha256": "ebd83688dd54180459040c283ccb4adeaca397e8dd95c045144d8eb9add0c719",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_vol",
+            "min_obs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1312298517,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1570,
+            "total_tokens": 8105
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

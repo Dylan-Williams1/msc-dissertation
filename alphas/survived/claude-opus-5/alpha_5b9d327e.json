@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_5b9d327e",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_short",
+            "N_long",
+            "N_ret",
+            "N_vol_ret",
+            "N_smooth",
+            "w_comp",
+            "w_rev",
+            "eps",
+            "clip_z",
+            "min_obs_frac"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-20T23:39:51.592240+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 10,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1609573728,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Intraday-Range Volatility Compression with Overnight-Gap Confirmation (Range-Contraction Reversal Alpha)\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral\n- **Parameters:**\n  - `N_short = 5` \u2014 short window for recent average normalized true range\n  - `N_long = 60` \u2014 long window for baseline average normalized true range\n  - `N_ret = 5` \u2014 window for cumulative return used as the reversal leg\n  - `N_vol_ret = 20` \u2014 window for realized return volatility used to scale the reversal leg\n  - `N_smooth = 3` \u2014 smoothing window applied to the final raw signal\n  - `w_comp = 0.5` \u2014 weight on the volatility-compression leg\n  - `w_rev = 0.5` \u2014 weight on the volatility-scaled reversal leg\n  - `eps = 1e-8` \u2014 numerical floor to avoid division by zero\n  - `clip_z = 4.0` \u2014 winsorization bound applied to intermediate z-scores\n  - `min_obs_frac = 0.8` \u2014 minimum fraction of a rolling window that must be observed\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (only `open`, `high`, `low`, `close`, `returns` are used)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities on day $t$ use data through the close of day $t$.\n\n**Step 1 \u2014 Normalized true range (daily volatility proxy).**\n\n$$\nTR_{i,t} = \\max\\big(H_{i,t},\\, C_{i,t-1}\\big) - \\min\\big(L_{i,t},\\, C_{i,t-1}\\big)\n$$\n\n$$\nr_{i,t} = \\frac{TR_{i,t}}{\\max\\big(C_{i,t},\\, eps\\big)}\n$$\n\nwhere $H,L,C$ are daily high, low, close. $r_{i,t}$ is undefined on the first observation of a symbol (no $C_{i,t-1}$).\n\n**Step 2 \u2014 Volatility compression ratio.**\n\n$$\nS^{(s)}_{i,t} = \\frac{1}{N_{short}} \\sum_{k=0}^{N_{short}-1} r_{i,t-k},\n\\qquad\nS^{(l)}_{i,t} = \\frac{1}{N_{long}} \\sum_{k=0}^{N_{long}-1} r_{i,t-k}\n$$\n\nBoth means require at least $\\lceil min\\_obs\\_frac \\cdot N \\rceil$ non-missing observations in their window; otherwise the value is missing.\n\n$$\nK_{i,t} = \\ln\\!\\left( \\frac{\\max\\big(S^{(s)}_{i,t},\\, eps\\big)}{\\max\\big(S^{(l)}_{i,t},\\, eps\\big)} \\right)\n$$\n\n$K_{i,t} < 0$ indicates recent range compression relative to the stock's own longer-run baseline; $K_{i,t} > 0$ indicates range expansion.\n\n**Step 3 \u2014 Volatility-scaled short-horizon return (reversal leg).**\n\n$$\nR_{i,t} = \\sum_{k=0}^{N_{ret}-1} \\ln\\big(1 + ret_{i,t-k}\\big)\n$$\n\n$$\n\\sigma_{i,t} = \\operatorname{stdev}\\big(\\{ret_{i,t-k}\\}_{k=0}^{N_{vol\\_ret}-1}\\big) \\quad\\text{(sample stdev, ddof}=1)\n$$\n\n$$\nG_{i,t} = \\frac{R_{i,t}}{\\max\\big(\\sigma_{i,t}\\sqrt{N_{ret}},\\, eps\\big)}\n$$\n\nBoth windows require at least $\\lceil min\\_obs\\_frac \\cdot N \\rceil$ non-missing observations.\n\n**Step 4 \u2014 Cross-sectional standardization.** For each date $t$, over the cross-section $\\mathcal{U}_t$ of symbols with both $K_{i,t}$ and $G_{i,t}$ defined:\n\n$$\nz^K_{i,t} = \\operatorname{clip}\\!\\left( \\frac{K_{i,t} - \\mu_t(K)}{\\max(s_t(K),\\, eps)},\\, -clip\\_z,\\, +clip\\_z \\right)\n$$\n\n$$\nz^G_{i,t} = \\operatorname{clip}\\!\\left( \\frac{G_{i,t} - \\mu_t(G)}{\\max(s_t(G),\\, eps)},\\, -clip\\_z,\\, +clip\\_z \\right)\n$$\n\nwhere $\\mu_t(\\cdot)$ and $s_t(\\cdot)$ are the cross-sectional mean and sample standard deviation on date $t$ over $\\mathcal{U}_t$.\n\n**Step 5 \u2014 Raw combined signal.**\n\n$$\nA_{i,t} = -\\,w_{comp}\\, z^K_{i,t} \\;-\\; w_{rev}\\, z^G_{i,t}\n$$\n\nThe signal is long stocks that are *compressed* in range ($K$ low $\\Rightarrow -z^K$ high) and that have *underperformed* on a volatility-adjusted basis over the last $N_{ret}$ days.\n\n**Step 6 \u2014 Time smoothing.**\n\n$$\n\\tilde{A}_{i,t} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} A_{i,t-k}\n$$\n\nrequiring at least $\\lceil min\\_obs\\_frac \\cdot N_{smooth} \\rceil$ non-missing observations.\n\n**Step 7 \u2014 Final cross-sectional neutralization and scaling.** For each date $t$ over symbols with $\\tilde{A}_{i,t}$ defined:\n\n$$\n\\alpha_{i,t} = \\frac{\\tilde{A}_{i,t} - \\mu_t(\\tilde{A})}{\\max\\big(s_t(\\tilde{A}),\\, eps\\big)}\n$$\n\n$\\alpha_{i,t}$ is the final signal, dollar-neutral by construction ($\\sum_i \\alpha_{i,t} = 0$).\n\n**Undefined-value handling (explicit):** (i) all rolling means/stdevs enforce the `min_obs_frac` minimum-count rule and yield missing values otherwise; (ii) every division has its denominator floored at `eps` in absolute magnitude (or via `max(\u00b7, eps)` where the quantity is non-negative by construction); (iii) cross-sectional moments are computed over available (non-missing) symbols only; (iv) missing values are propagated as missing and are never imputed \u2014 a symbol with a missing $\\alpha_{i,t}$ carries no position that day; (v) intermediate z-scores are winsorized at $\\pm clip\\_z$.\n\n# Section 3: Causal Rationale\n\nDaily true range measures the amount of price disagreement resolved within a trading session, and it is strongly persistent, so a stock whose recent average normalized true range has fallen well below its own longer-run baseline is in a low-information, low-disagreement state where the marginal liquidity provider faces little adverse-selection risk. In such compressed states, short-horizon price moves are disproportionately driven by transient liquidity demand rather than by information arrival, so market makers can absorb the order flow and demand compensation for doing so \u2014 which is realized as subsequent reversal of the recent move. Conversely, when the range is expanding relative to baseline, the same short-horizon move is more likely to reflect genuine information being impounded, and reversal is a poorer bet; the compression leg therefore selects the regime in which the reversal leg is economically justified. Both legs are constructed from within-stock normalizations (range divided by price, return divided by trailing return volatility) so that the cross-sectional comparison ranks stocks by regime and by move-size-in-own-risk-units rather than by their unconditional volatility level, which would otherwise dominate. The signal is smoothed over `N_smooth` days and standardized cross-sectionally so that exposure reflects relative rather than absolute conditions and turnover is moderated.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses only point-in-time daily OHLCV and returns fields (`open`, `high`, `low`, `close`, `returns`). No fundamental, analyst, index-membership, or any other non-PIT data is used. No survivorship-adjusted or restated inputs are required.\n- **Execution timing:** The execution rule is fixed: the signal for date $t$ is computed exclusively from data available at or before the market close of day $t$, and the resulting target position is executed at the **open of day $t+1$**. Every term in Section 2 \u2014 true range, rolling means, rolling standard deviation, cumulative returns, cross-sectional moments, and the trailing smoothing window \u2014 references only indices $\\le t$. No forward-looking operator (`shift(-1)`, centered rolling, future cross-sectional statistics) appears anywhere in the formulation or code. The function returns the signal aligned to date $t$; the one-day execution lag is applied by the backtesting harness, not inside the function.\n- **Minimum trailing observations:** The binding constraint is $S^{(l)}$, which requires $\\lceil min\\_obs\\_frac \\times N_{long} \\rceil = 48$ valid normalized-true-range observations, each of which requires a prior close. Including the smoothing window, the signal is first defined for a symbol after **$\\lceil 0.8 \\times 60 \\rceil + 1 + \\lceil 0.8 \\times 3 \\rceil - 1 = 51$ trailing daily observations**; a conservative practical minimum of **63 trading days** ($N_{long}+N_{smooth}$) is recommended before the symbol is included in the tradable universe.\n- **Universe / other constraints:** The signal is only meaningful cross-sectionally and requires at least two symbols with defined values on a given date for standardization; dates failing this yield missing values. The strategy is dollar-neutral by construction but is not explicitly beta-, sector-, or size-neutral. Symbols with missing or non-positive closes produce missing signal values and are untradable that day. Expected holding period is 5 days; the strategy assumes liquid, continuously traded US equities where execution at the day $t+1$ open is feasible.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_short=5,\n                   N_long=60,\n                   N_ret=5,\n                   N_vol_ret=20,\n                   N_smooth=3,\n                   w_comp=0.5,\n                   w_rev=0.5,\n                   eps=1e-8,\n                   clip_z=4.0,\n                   min_obs_frac=0.8):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    prev_close = g['close'].shift(1)\n\n    tr = (np.maximum(data['high'], prev_close)\n          - np.minimum(data['low'], prev_close))\n    ntr = tr / np.maximum(data['close'], eps)\n\n    mp_short = int(np.ceil(min_obs_frac * N_short))\n    mp_long = int(np.ceil(min_obs_frac * N_long))\n    mp_ret = int(np.ceil(min_obs_frac * N_ret))\n    mp_volret = int(np.ceil(min_obs_frac * N_vol_ret))\n    mp_smooth = int(np.ceil(min_obs_frac * N_smooth))\n\n    s_short = ntr.groupby(level='symbol').rolling(\n        N_short, min_periods=mp_short).mean().reset_index(level=0, drop=True)\n    s_long = ntr.groupby(level='symbol').rolling(\n        N_long, min_periods=mp_long).mean().reset_index(level=0, drop=True)\n\n    s_short = s_short.reindex(data.index)\n    s_long = s_long.reindex(data.index)\n\n    K = np.log(np.maximum(s_short, eps) / np.maximum(s_long, eps))\n\n    log_ret = np.log1p(data['returns'])\n    R = log_ret.groupby(level='symbol').rolling(\n        N_ret, min_periods=mp_ret).sum().reset_index(level=0, drop=True)\n    R = R.reindex(data.index)\n\n    sigma = data['returns'].groupby(level='symbol').rolling(\n        N_vol_ret, min_periods=mp_volret).std(ddof=1).reset_index(level=0, drop=True)\n    sigma = sigma.reindex(data.index)\n\n    G = R / np.maximum(sigma * np.sqrt(N_ret), eps)\n\n    K = K.where(np.isfinite(K))\n    G = G.where(np.isfinite(G))\n\n    valid = K.notna() & G.notna()\n    K = K.where(valid)\n    G = G.where(valid)\n\n    gK = K.groupby(level='date')\n    zK = ((K - gK.transform('mean'))\n          / np.maximum(gK.transform('std'), eps)).clip(-clip_z, clip_z)\n\n    gG = G.groupby(level='date')\n    zG = ((G - gG.transform('mean'))\n          / np.maximum(gG.transform('std'), eps)).clip(-clip_z, clip_z)\n\n    A = -w_comp * zK - w_rev * zG\n\n    A_smooth = A.groupby(level='symbol').rolling(\n        N_smooth, min_periods=mp_smooth).mean().reset_index(level=0, drop=True)\n    A_smooth = A_smooth.reindex(data.index)\n\n    gA = A_smooth.groupby(level='date')\n    alpha = (A_smooth - gA.transform('mean')) / np.maximum(gA.transform('std'), eps)\n\n    alpha = alpha.where(np.isfinite(alpha))\n    alpha.name = 'alpha'\n\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "a8e1e4daaa0d8c04c829ac460e5094a3bc54abcc820f207056f2a772da02e133",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_short",
+            "N_long",
+            "N_ret",
+            "N_vol_ret",
+            "N_smooth",
+            "w_comp",
+            "w_rev",
+            "eps",
+            "clip_z",
+            "min_obs_frac"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1624,
+            "output_tokens": 4751,
+            "total_tokens": 6375
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

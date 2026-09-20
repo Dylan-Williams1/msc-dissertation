@@ -1,0 +1,78 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_3c2f1bc5",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1385205569,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_park",
+            "N_cc",
+            "N_ret",
+            "eps"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-24T18:35:38.779887+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 9,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Parkinson-to-Close Volatility Disparity Reversal (PCVDR)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_park = 5` (Short-term Parkinson volatility lookback window in days)\n  - `N_cc = 20` (Long-term close-to-close volatility lookback window in days)\n  - `N_ret = 5` (Short-term cumulative return lookback window in days)\n  - `eps = 1e-6` (Small constant for numerical stability)\n- Required Inputs: `high`, `low`, `returns`\n\n---\n\n# Section 2: Mathematical Formulation\n\nFor each symbol $i$ on date $t$:\n\n1. Calculate the daily Parkinson variance proxy $v_{P, i, t}$:\n$$v_{P, i, t} = \\frac{\\left( \\ln(High_{i,t} / Low_{i,t}) \\right)^2}{4 \\ln 2}$$\n\n2. Compute the rolling Parkinson volatility $\\sigma_{P, i, t}$ over window $N_{park}$:\n$$\\sigma_{P, i, t} = \\sqrt{\\max\\left(0, \\frac{1}{N_{park}} \\sum_{k=0}^{N_{park}-1} v_{P, i, t-k}\\right)}$$\n\n3. Compute the rolling close-to-close volatility $\\sigma_{CC, i, t}$ over window $N_{cc}$:\n$$\\sigma_{CC, i, t} = \\sqrt{\\frac{1}{N_{cc}-1} \\sum_{k=0}^{N_{cc}-1} (R_{i,t-k} - \\bar{R}_{i,t})^2}$$\nwhere $\\bar{R}_{i,t} = \\frac{1}{N_{cc}} \\sum_{k=0}^{N_{cc}-1} R_{i,t-k}$ and $R_{i,t}$ is the daily return `returns`.\n\n4. Compute the Volatility Disparity Ratio $VR_{i,t}$:\n$$VR_{i,t} = \\frac{\\sigma_{P, i, t}}{\\sigma_{CC, i, t} + eps}$$\n\n5. Compute the cumulative short-term return $CR_{i,t}$ over window $N_{ret}$:\n$$CR_{i,t} = \\exp\\left( \\sum_{k=0}^{N_{ret}-1} \\ln(1 + R_{i,t-k}) \\right) - 1$$\n\n6. Compute the unnormalized raw alpha signal $S_{i,t}$:\n$$S_{i,t} = -1 \\times VR_{i,t} \\times CR_{i,t}$$\n\n7. Compute the cross-sectional z-score across all valid symbols $i \\in \\{1, \\dots, M\\}$ on date $t$:\n$$\\alpha_{i,t} = \\frac{S_{i,t} - \\mu_t(S)}{\\sigma_t(S) + eps}$$\nwhere $\\mu_t(S)$ is the cross-sectional mean of $S_{i,t}$ on date $t$, and $\\sigma_t(S)$ is the cross-sectional standard deviation of $S_{i,t}$ on date $t$.\n\n**Handling of Undefined Values:**\n- Rolling operations for $\\sigma_{P, i, t}$, $\\sigma_{CC, i, t}$, and $CR_{i,t}$ require a minimum observation count equal to their respective parameter values ($N_{park}$, $N_{cc}$, and $N_{ret}$). If fewer observations are available, the resulting value is set to NaN.\n- Zero-division in fractions is avoided by adding `eps` to denominators.\n- Cross-sectional z-scoring ignores NaN values and requires a minimum of 2 non-NaN observations per date; otherwise, output yields NaN for that date.\n\n---\n\n# Section 3: Causal Rationale\n\nIntraday high-to-low price range reflects immediate market-clearing friction and aggressive order imbalance, whereas multi-week close-to-close return standard deviation measures baseline asset volatility. When short-term Parkinson volatility spikes significantly above baseline close-to-close volatility during a short-term price decline ($CR_{i,t} < 0$), it signals aggressive market-order liquidations and temporary order book exhaustion. This temporary illiquidity over-extends prices relative to underlying fundamentals, creating a mispricing that liquidity providers arbitrage away through mean-reversion over the subsequent holding period. Conversely, elevated intraday volatility during strong upward price moves indicates overextended buying surges prone to short-term pullbacks.\n\n---\n\n# Section 4: Structural Bounds\n\n- **Point-in-Time Confirmation:** The strategy relies strictly on Point-in-Time daily OHLCV market data without post-hoc revisions.\n- **Execution Timing:** The signal $\\alpha_{i,t}$ is constructed using price and return data available up to market close on day $t$. Trades are executed at the OPEN of day $t+1$. The mathematical formulation and output series are aligned to day $t$; execution lag is handled by the downstream backtesting framework.\n- **Minimum Trailing Observations:** A minimum trailing window of $\\max(N_{park}, N_{cc}, N_{ret}) = 20$ trading days is required before the signal is defined for any symbol.\n\n---\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_park=5, N_cc=20, N_ret=5, eps=1e-6):\n    # Daily Parkinson variance proxy\n    log_hl = np.log(df['high'] / df['low'])\n    park_var = (log_hl ** 2) / (4.0 * np.log(2.0))\n\n    # Rolling Parkinson volatility\n    rolling_park_var = park_var.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_park, min_periods=N_park).mean()\n    )\n    sigma_park = np.sqrt(np.maximum(0.0, rolling_park_var))\n\n    # Rolling Close-to-Close volatility\n    sigma_cc = df['returns'].groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_cc, min_periods=N_cc).std(ddof=1)\n    )\n\n    # Volatility Ratio\n    vr = sigma_park / (sigma_cc + eps)\n\n    # Cumulative short-term return using log returns\n    log_ret = np.log1p(df['returns'])\n    cum_log_ret = log_ret.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_ret, min_periods=N_ret).sum()\n    )\n    cum_ret = np.expm1(cum_log_ret)\n\n    # Raw alpha signal\n    raw_alpha = -1.0 * vr * cum_ret\n\n    # Cross-sectional z-score standardization by date\n    mean_cs = raw_alpha.groupby(level='date').transform('mean')\n    std_cs = raw_alpha.groupby(level='date').transform('std')\n\n    alpha = (raw_alpha - mean_cs) / (std_cs + eps)\n\n    return alpha\n```",
+    "response_sha256": "ae4607792117b97d3ee7f60959834082ab5a66ecc8040e9094970838c8629a1b",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_park",
+            "N_cc",
+            "N_ret",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1385205569,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1656,
+            "total_tokens": 6652
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

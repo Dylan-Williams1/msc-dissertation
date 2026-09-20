@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_b38fe0a9",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_illiq",
+            "M_illiq",
+            "N_volshort",
+            "N_vollong",
+            "M_vol",
+            "w_illiq",
+            "w_vs",
+            "Z_clip",
+            "MIN_NAMES"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-20T23:41:54.948814+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 12,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1721698274,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Illiquidity- and Volume-Shock-Amplified Short-Horizon Reversal (ILLIQ-VS Reversal)\n- **Holding Period:** 5 trading days (signal recomputed daily; expected turnover consistent with a ~5-day horizon)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional z-score)\n- **Parameters:**\n  - `N_rev = 5` (reversal accumulation window, days)\n  - `N_illiq = 21` (Amihud illiquidity averaging window, days)\n  - `M_illiq = 15` (minimum observations for the illiquidity average)\n  - `N_volshort = 5` (short volume-average window, days)\n  - `N_vollong = 20` (long volume-average window, days)\n  - `M_vol = 15` (minimum observations for the long volume average)\n  - `w_illiq = 1.0` (weight of the illiquidity amplifier)\n  - `w_vs = 1.0` (weight of the volume-shock amplifier)\n  - `Z_clip = 3.0` (cross-sectional z-score winsorisation bound)\n  - `MIN_NAMES = 20` (minimum number of valid symbols on a date for the cross-section to be defined)\n- **Required Inputs:** `close`, `volume`, `returns` (subset of the permitted OHLCV+Returns set)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use only information up to and including the close of day $t$.\n\n**Step 1 \u2014 Reversal component.**\n$$\n\\mathrm{REV}_{i,t} \\;=\\; \\sum_{k=0}^{N_{rev}-1} r_{i,t-k}, \\qquad r_{i,t}=\\texttt{returns}_{i,t}\n$$\nDefined only if all $N_{rev}$ observations in the window are present (min. observations $=N_{rev}$); otherwise $\\mathrm{NaN}$.\n\n**Step 2 \u2014 Daily Amihud illiquidity.**\n$$\nDV_{i,t} = \\texttt{close}_{i,t}\\cdot \\texttt{volume}_{i,t}, \\qquad\n\\lambda_{i,t} =\n\\begin{cases}\n\\dfrac{|r_{i,t}|}{DV_{i,t}}, & DV_{i,t} > 0\\\\[6pt]\n\\mathrm{NaN}, & DV_{i,t} \\le 0 \\text{ or } DV_{i,t} \\text{ missing}\n\\end{cases}\n$$\n(Division by zero is thus avoided explicitly by mapping non-positive dollar volume to $\\mathrm{NaN}$.)\n\n$$\n\\mathrm{ILLIQ}_{i,t} = \\frac{1}{\\#\\mathcal{K}_{i,t}}\\sum_{k\\in\\mathcal{K}_{i,t}} \\lambda_{i,t-k},\\quad\n\\mathcal{K}_{i,t}=\\{k\\in[0,N_{illiq}-1] : \\lambda_{i,t-k}\\text{ defined}\\}\n$$\nDefined only if $\\#\\mathcal{K}_{i,t}\\ge M_{illiq}$; otherwise $\\mathrm{NaN}$.\n\n**Step 3 \u2014 Volume shock (liquidity-demand pressure over the reversal window).**\n$$\n\\bar V^{S}_{i,t}=\\frac{1}{N_{volshort}}\\sum_{k=0}^{N_{volshort}-1}\\texttt{volume}_{i,t-k},\n\\qquad\n\\bar V^{L}_{i,t}=\\frac{1}{\\#\\mathcal{J}_{i,t}}\\sum_{k\\in\\mathcal{J}_{i,t}}\\texttt{volume}_{i,t-k}\n$$\nwith $\\mathcal{J}_{i,t}$ the set of non-missing volume observations in the last $N_{vollong}$ days; $\\bar V^{L}$ requires $\\#\\mathcal{J}_{i,t}\\ge M_{vol}$, $\\bar V^{S}$ requires all $N_{volshort}$ observations.\n$$\n\\mathrm{VS}_{i,t}=\n\\begin{cases}\n\\ln\\!\\left(\\dfrac{\\bar V^{S}_{i,t}}{\\bar V^{L}_{i,t}}\\right), & \\bar V^{S}_{i,t}>0 \\text{ and } \\bar V^{L}_{i,t}>0\\\\[6pt]\n\\mathrm{NaN}, & \\text{otherwise}\n\\end{cases}\n$$\n\n**Step 4 \u2014 Cross-sectional centred ranks.** For any variable $X_{i,t}$ defined on the set $S_t$ of symbols with all three of $\\mathrm{REV},\\mathrm{ILLIQ},\\mathrm{VS}$ non-missing at date $t$, with $n_t=|S_t|$:\n$$\nu^{X}_{i,t}=\\frac{\\mathrm{rank}(X_{i,t}\\mid i\\in S_t)-1}{n_t-1}-\\tfrac12 \\;\\in\\;[-\\tfrac12,\\tfrac12]\n$$\nusing average ranks for ties. The date is skipped ($\\mathrm{NaN}$ for all $i$) if $n_t < \\mathrm{MIN\\_NAMES}$.\n\n**Step 5 \u2014 Raw alpha.**\n$$\nA_{i,t} \\;=\\; -\\,u^{\\mathrm{REV}}_{i,t}\\;\\cdot\\;\\Bigl(1+w_{illiq}\\,u^{\\mathrm{ILLIQ}}_{i,t}\\Bigr)\\;\\cdot\\;\\Bigl(1+w_{vs}\\,u^{\\mathrm{VS}}_{i,t}\\Bigr)\n$$\nBoth amplifier factors lie in $[1-\\tfrac{w}{2},\\,1+\\tfrac{w}{2}]$ and are strictly positive for the default weights, so the sign of $A_{i,t}$ is always the sign of the reversal term.\n\n**Step 6 \u2014 Cross-sectional standardisation and winsorisation.**\n$$\n\\alpha_{i,t}=\\mathrm{clip}\\!\\left(\\frac{A_{i,t}-\\mu_t}{\\sigma_t},\\,-Z_{clip},\\,+Z_{clip}\\right),\\qquad\n\\mu_t=\\frac{1}{n_t}\\sum_{j\\in S_t}A_{j,t},\\;\\;\n\\sigma_t=\\sqrt{\\frac{1}{n_t-1}\\sum_{j\\in S_t}(A_{j,t}-\\mu_t)^2}\n$$\nIf $\\sigma_t=0$ or is undefined, $\\alpha_{i,t}=\\mathrm{NaN}$ for that date (no division by zero).\n\n**Missing-value handling:** no imputation is performed anywhere. Symbols with any undefined input at date $t$ are excluded from the cross-section at $t$ and receive $\\mathrm{NaN}$.\n\n# Section 3: Causal Rationale\n\nShort-horizon price moves accompanied by an abnormal surge in traded volume relative to the stock's own recent norm are the observable footprint of liquidity demand being absorbed by finite market-making capacity: the transitory price concession paid to clear that order flow subsequently reverts as inventory is unwound. The Amihud measure $|r|/(\\text{price}\\times\\text{volume})$ is a direct daily-data proxy for the price impact per dollar traded, so a high value identifies names in which a given quantity of liquidity demand moves price furthest and therefore in which the transitory component of a recent move is largest relative to any information component. Multiplying the sign-carrying reversal rank by the illiquidity rank and by the log volume-shock rank concentrates exposure on precisely those names where both the price-impact coefficient is high and the recent order flow was unusually heavy, and shrinks exposure in deep, quietly traded names where a 5-day move is more plausibly informational and hence permanent. The construction is cross-sectionally ranked and z-scored so that the position reflects relative, not absolute, illiquidity, insulating it from market-wide shifts in trading activity. The 5-day horizon matches the typical timescale over which dealer inventory imbalances created by a burst of trading are laid off.\n\n# Section 4: Structural Bounds\n\n- **Data:** the alpha uses exclusively Point-in-Time daily OHLCV data (`close`, `volume`, `returns`). No fundamental, analyst, index-membership, corporate-action or intraday data are used. `returns` must be the PIT split/dividend-adjusted daily return known at the close of day $t$; `close` and `volume` must be as reported for day $t$ with no forward-looking restatement.\n- **Execution timing (fixed rule):** the signal is computed from data available up to and including the market close of day $t$ and is executed at the **open of day $t+1$**. Every term in Section 2 is a function of observations at dates $\\le t$ only; no negative shifts, forward fills across dates, or centred windows are used, so the formulation complies with this rule. The one-bar execution lag is applied by the backtest harness, not inside the signal function.\n- **Minimum trailing observations per symbol:** the binding requirement is $\\max(M_{illiq},\\,M_{vol},\\,N_{rev},\\,N_{volshort}) = 15$ valid daily observations within the longest window $\\max(N_{illiq},N_{vollong})=21$; in practice a symbol should have at least **22 consecutive trailing daily bars** (21 for the windows plus the first return observation) before the signal is treated as defined.\n- **Cross-sectional requirement:** at least `MIN_NAMES = 20` symbols with all components defined on date $t$; otherwise no signal is produced for that date.\n- **Applicability limits:** the illiquidity amplifier will tilt gross exposure toward low-dollar-volume names, so a live implementation should apply a separate, exogenous tradability universe filter (e.g. minimum average dollar volume and minimum price) upstream of this function; such a filter is not part of the alpha definition. The signal is undefined for symbols with non-positive dollar volume (halts, zero-volume days) on more than $N_{illiq}-M_{illiq}$ of the last $N_{illiq}$ days.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_rev=5,\n                   N_illiq=21,\n                   M_illiq=15,\n                   N_volshort=5,\n                   N_vollong=20,\n                   M_vol=15,\n                   w_illiq=1.0,\n                   w_vs=1.0,\n                   Z_clip=3.0,\n                   MIN_NAMES=20):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    # Step 1: reversal component\n    rev = g['returns'].transform(\n        lambda s: s.rolling(N_rev, min_periods=N_rev).sum()\n    )\n\n    # Step 2: daily Amihud illiquidity and its rolling average\n    dv = data['close'] * data['volume']\n    dv_valid = dv.where(dv > 0)\n    lam = data['returns'].abs() / dv_valid\n    illiq = lam.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_illiq, min_periods=M_illiq).mean()\n    )\n\n    # Step 3: volume shock\n    v_short = g['volume'].transform(\n        lambda s: s.rolling(N_volshort, min_periods=N_volshort).mean()\n    )\n    v_long = g['volume'].transform(\n        lambda s: s.rolling(N_vollong, min_periods=M_vol).mean()\n    )\n    ratio = v_short.where(v_short > 0) / v_long.where(v_long > 0)\n    vs = np.log(ratio)\n\n    # Common cross-sectional support\n    valid = rev.notna() & illiq.notna() & vs.notna()\n    rev_v = rev.where(valid)\n    illiq_v = illiq.where(valid)\n    vs_v = vs.where(valid)\n\n    n_names = valid.groupby(level='date').transform('sum')\n    enough = n_names >= MIN_NAMES\n\n    rev_v = rev_v.where(enough)\n    illiq_v = illiq_v.where(enough)\n    vs_v = vs_v.where(enough)\n\n    # Step 4: centred cross-sectional ranks in [-0.5, 0.5]\n    u_rev = rev_v.groupby(level='date').rank(method='average', pct=False)\n    u_illiq = illiq_v.groupby(level='date').rank(method='average', pct=False)\n    u_vs = vs_v.groupby(level='date').rank(method='average', pct=False)\n\n    cnt = rev_v.groupby(level='date').transform('count')\n    denom = (cnt - 1.0).where(cnt > 1)\n\n    u_rev = (u_rev - 1.0) / denom - 0.5\n    u_illiq = (u_illiq - 1.0) / denom - 0.5\n    u_vs = (u_vs - 1.0) / denom - 0.5\n\n    # Step 5: raw alpha\n    raw = -u_rev * (1.0 + w_illiq * u_illiq) * (1.0 + w_vs * u_vs)\n\n    # Step 6: cross-sectional z-score with winsorisation\n    grp = raw.groupby(level='date')\n    mu = grp.transform('mean')\n    sd = grp.transform('std')\n    sd = sd.where(sd > 0)\n    alpha = ((raw - mu) / sd).clip(lower=-Z_clip, upper=Z_clip)\n\n    alpha.name = 'alpha'\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "a903721279d67055bfda37229e83710143cd4f1284d12590e8470d49f48d8857",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_illiq",
+            "M_illiq",
+            "N_volshort",
+            "N_vollong",
+            "M_vol",
+            "w_illiq",
+            "w_vs",
+            "Z_clip",
+            "MIN_NAMES"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1625,
+            "output_tokens": 5968,
+            "total_tokens": 7593
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

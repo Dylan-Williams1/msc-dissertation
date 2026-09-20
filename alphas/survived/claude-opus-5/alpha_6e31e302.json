@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_6e31e302",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_ret",
+            "N_vol",
+            "N_vstd",
+            "N_clv",
+            "N_smooth",
+            "Z_cap",
+            "W_min",
+            "W_max",
+            "EPS",
+            "MIN_OBS"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-20T23:46:36.557921+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 17,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1091097945,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed Reversal Discount (VCRD) \u2014 short-horizon reversal conditioned on abnormal volume and intraday close location\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, dollar-neutral cross-sectional signal\n- **Parameters:**\n  - `N_ret = 5` \u2014 lookback window (days) for the cumulative return used as the reversal base\n  - `N_vol = 60` \u2014 lookback window (days) for the baseline (median) dollar-volume level\n  - `N_vstd = 60` \u2014 lookback window (days) for the dispersion of log dollar volume\n  - `N_clv = 5` \u2014 lookback window (days) for averaging the intraday close-location value\n  - `N_smooth = 3` \u2014 smoothing span (days, simple moving average) applied to the final cross-sectional score\n  - `Z_cap = 3.0` \u2014 symmetric winsorisation bound applied to the volume-surprise z-score\n  - `W_min = 0.25` \u2014 floor on the volume-intensity weight\n  - `W_max = 2.00` \u2014 cap on the volume-intensity weight\n  - `EPS = 1e-12` \u2014 numerical floor used in all denominators\n  - `MIN_OBS = 60` \u2014 minimum trailing observations per symbol before the signal is defined\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (daily, point-in-time)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use data up to and including the close of day $t$.\n\n**Step 1 \u2014 Dollar volume and its log.**\n$$D_{i,t} = \\text{close}_{i,t}\\cdot \\text{volume}_{i,t}, \\qquad \\ell_{i,t} = \\ln\\!\\left(D_{i,t} + EPS\\right)$$\n\n**Step 2 \u2014 Volume surprise z-score.** Using a trailing median for location and trailing standard deviation for scale over the *prior* window (excluding day $t$ is *not* applied; the window is inclusive of $t$, which is permissible since $t$ data is known at the close of $t$):\n$$m_{i,t} = \\operatorname{median}\\left(\\ell_{i,t-N_{vol}+1},\\dots,\\ell_{i,t}\\right)$$\n$$s_{i,t} = \\operatorname{stdev}\\left(\\ell_{i,t-N_{vstd}+1},\\dots,\\ell_{i,t}\\right) \\quad \\text{(sample, ddof}=1\\text{)}$$\n$$z_{i,t} = \\operatorname{clip}\\!\\left(\\frac{\\ell_{i,t}-m_{i,t}}{s_{i,t}+EPS},\\; -Z_{cap},\\; +Z_{cap}\\right)$$\nBoth rolling windows require the full window of observations (`min_periods` equal to the window length); otherwise $z_{i,t}$ is undefined (NaN).\n\n**Step 3 \u2014 Volume-intensity weight.** A monotone, bounded transform of the volume surprise:\n$$w_{i,t} = \\min\\Big(\\max\\big(\\exp(z_{i,t}),\\, W_{min}\\big),\\, W_{max}\\Big)$$\nSo $w \\to W_{min}$ on unusually quiet days and $w \\to W_{max}$ on unusually heavy days.\n\n**Step 4 \u2014 Reversal base.** Cumulative return over the last $N_{ret}$ days:\n$$R_{i,t} = \\prod_{k=0}^{N_{ret}-1}\\left(1+\\text{returns}_{i,t-k}\\right) - 1$$\nrequiring all $N_{ret}$ observations present; otherwise undefined.\n\n**Step 5 \u2014 Intraday close-location value (CLV), averaged.** For each day,\n$$c_{i,t} = \\frac{2\\,\\text{close}_{i,t} - \\text{high}_{i,t} - \\text{low}_{i,t}}{\\left(\\text{high}_{i,t}-\\text{low}_{i,t}\\right) + EPS} \\in [-1,1]$$\n$$\\bar{c}_{i,t} = \\frac{1}{N_{clv}}\\sum_{k=0}^{N_{clv}-1} c_{i,t-k}$$\nrequiring all $N_{clv}$ observations present; otherwise undefined. (When $\\text{high}=\\text{low}$, the $EPS$ floor makes $c_{i,t}=0$ up to numerical precision, i.e. a neutral close location.)\n\n**Step 6 \u2014 Raw signal.** Reversal magnitude, amplified by volume intensity, and further amplified when the recent close location agrees in sign with the move to be reversed:\n$$g_{i,t} = -\\,w_{i,t}\\cdot\\Big(R_{i,t} + \\tfrac{1}{2}\\,R_{i,t}\\,\\bar{c}_{i,t}\\Big) \\;=\\; -\\,w_{i,t}\\,R_{i,t}\\left(1+\\tfrac{1}{2}\\bar{c}_{i,t}\\right)$$\nThe factor $\\left(1+\\tfrac{1}{2}\\bar{c}_{i,t}\\right)\\in[0.5,1.5]$ scales the reversal by whether closes have been printing near the top (agreement with an up-move) or bottom of the daily range.\n\n**Step 7 \u2014 Cross-sectional normalisation.** On each date $t$, over the set $S_t$ of symbols with $g_{i,t}$ defined ($|S_t|\\ge 2$):\n$$u_{i,t} = \\frac{\\operatorname{rank}(g_{i,t}) - 1}{|S_t| - 1} - \\tfrac{1}{2}, \\qquad u_{i,t}\\in[-\\tfrac12,\\tfrac12]$$\nwhere $\\operatorname{rank}$ is the ascending average rank within $S_t$. Dates with $|S_t|<2$ yield undefined values.\n\n**Step 8 \u2014 Temporal smoothing.** Per symbol, a simple moving average of the cross-sectional score:\n$$\\alpha_{i,t} = \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} u_{i,t-k}$$\nrequiring all $N_{smooth}$ observations present; otherwise undefined.\n\n**Step 9 \u2014 Final demeaning.** On each date, subtract the cross-sectional mean over defined values so the signal is dollar-neutral:\n$$A_{i,t} = \\alpha_{i,t} - \\frac{1}{|S'_t|}\\sum_{j\\in S'_t}\\alpha_{j,t}$$\n\n**Handling of undefined values.** Division by zero is prevented exclusively by the additive $EPS$ floor in Steps 1, 2, 5. Winsorisation occurs only at Step 2 ($Z_{cap}$) and Step 3 ($W_{min},W_{max}$). Missing observations are never imputed: any rolling window lacking its full complement of observations produces NaN, and NaN values are excluded from cross-sectional ranking/demeaning and propagate to the output for that symbol-date. No other clipping or filling is performed.\n\n# Section 3: Causal Rationale\n\nDaily volume is the observable footprint of how much liquidity a price move consumed: a given percentage move accompanied by dollar volume far above its own 60-day median indicates the move was absorbed by a limited pool of resting liquidity, so a share of the price change is compensation paid to liquidity providers rather than new information being impounded. That inventory compensation is mechanically transient \u2014 market makers unwind and the price concession decays \u2014 which motivates fading the recent $N_{ret}$-day return and scaling the fade by the volume-surprise weight $w$, so quiet-volume moves (more likely to be slow information diffusion) are faded weakly and high-volume moves strongly. The close-location value adds an intraday confirmation channel observable in the same bar: closes printing near the extreme of the day's range indicate the move was still pressing against the range boundary at the bell, the signature of unfinished order-flow imbalance rather than orderly repricing, so the reversal expectation is scaled up when close location agrees in sign with the move. Using the log-median baseline rather than a mean baseline makes the volume-surprise measure robust to the heavily right-skewed distribution of daily volume, and using dollar volume rather than share volume keeps the measure comparable across price levels and across split-adjusted histories. Cross-sectional ranking removes market-wide volume and volatility regimes so the signal expresses only the relative ordering of liquidity-provision compensation on each date.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses exclusively point-in-time daily OHLCV and returns. No fundamentals, no analyst data, no index membership, no intraday data, no corporate-action or delisting knowledge, and no forward-looking data of any kind. Prices are assumed split/dividend-adjusted consistently with the `returns` column as of date $t$ only.\n- **Execution timing (fixed):** The signal for date $t$ is constructed using information available up to and including the market close of day $t$, and the resulting portfolio is executed at the **open of day $t+1$**. The formulation complies: every rolling window terminates at index $t$ inclusive and no negative shift, forward fill from the future, or same-bar close execution is used. The implementation returns the signal aligned to date $t$; the one-day execution lag is applied by the backtesting harness.\n- **Minimum trailing observations:** `MIN_OBS = 60` daily bars per symbol are required before Step 7 output exists (driven by the binding `N_vol = 60` / `N_vstd = 60` windows). Including the `N_smooth = 3` moving average, the first non-NaN final value for a symbol occurs on its 62nd valid bar, i.e. $\\max(N_{vol}, N_{vstd}, N_{ret}, N_{clv}) + N_{smooth} - 1 = 62$.\n- **Cross-sectional requirement:** at least 2 symbols with defined raw signal on a given date; otherwise the date is undefined.\n- **Other constraints:** the signal is a relative score, not a return forecast; it is intended for a dollar-neutral cross-sectional book with a 5-day holding period. It is unsuitable for symbols with frequent zero-volume or halted sessions, since those bars enter the volume baseline; no such filter is applied inside the formulation.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_ret=5,\n                   N_vol=60,\n                   N_vstd=60,\n                   N_clv=5,\n                   N_smooth=3,\n                   Z_cap=3.0,\n                   W_min=0.25,\n                   W_max=2.00,\n                   EPS=1e-12,\n                   MIN_OBS=60):\n\n    data = df.sort_index()\n\n    g_sym = data.groupby(level='symbol')\n\n    # Step 1: dollar volume and log dollar volume\n    dollar_vol = data['close'] * data['volume']\n    log_dv = np.log(dollar_vol + EPS)\n\n    ldv_sym = log_dv.groupby(level='symbol')\n\n    # Step 2: volume surprise z-score (median location, stdev scale)\n    med = ldv_sym.transform(lambda s: s.rolling(N_vol, min_periods=N_vol).median())\n    sd = ldv_sym.transform(lambda s: s.rolling(N_vstd, min_periods=N_vstd).std(ddof=1))\n    z = ((log_dv - med) / (sd + EPS)).clip(lower=-Z_cap, upper=Z_cap)\n\n    # Step 3: bounded volume-intensity weight\n    w = np.exp(z).clip(lower=W_min, upper=W_max)\n\n    # Step 4: cumulative return over N_ret days\n    log1p_ret = np.log1p(data['returns'])\n    cum_log = log1p_ret.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_ret, min_periods=N_ret).sum())\n    R = np.expm1(cum_log)\n\n    # Step 5: close-location value, averaged over N_clv days\n    clv = (2.0 * data['close'] - data['high'] - data['low']) / \\\n          ((data['high'] - data['low']) + EPS)\n    clv_bar = clv.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_clv, min_periods=N_clv).mean())\n\n    # Step 6: raw signal\n    g = -w * R * (1.0 + 0.5 * clv_bar)\n\n    # Step 7: cross-sectional rank scaled to [-0.5, 0.5]\n    by_date = g.groupby(level='date')\n    n_valid = by_date.transform('count')\n    ranks = by_date.rank(method='average', ascending=True)\n    u = (ranks - 1.0) / (n_valid - 1.0) - 0.5\n    u = u.where(n_valid >= 2)\n\n    # Step 8: temporal smoothing\n    alpha = u.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_smooth, min_periods=N_smooth).mean())\n\n    # Enforce minimum trailing observation requirement per symbol\n    obs_count = data['close'].groupby(level='symbol').cumcount() + 1\n    alpha = alpha.where(obs_count >= MIN_OBS)\n\n    # Step 9: cross-sectional demeaning\n    signal = alpha - alpha.groupby(level='date').transform('mean')\n\n    signal.name = 'alpha_vcrd'\n    return signal.reindex(df.index)\n```",
+    "response_sha256": "c9a57defcee39238a813e2b3e0b1a02f2a2b0d0fe4dc0b29b1576fe6e133d59c",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_ret",
+            "N_vol",
+            "N_vstd",
+            "N_clv",
+            "N_smooth",
+            "Z_cap",
+            "W_min",
+            "W_max",
+            "EPS",
+            "MIN_OBS"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1625,
+            "output_tokens": 4693,
+            "total_tokens": 6318
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

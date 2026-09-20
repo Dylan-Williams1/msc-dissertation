@@ -1,0 +1,105 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_72c354e4",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_illiq",
+            "N_dvol",
+            "N_vol",
+            "N_smooth",
+            "min_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-20T23:42:52.475561+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 13,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2050232787,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Illiquidity-Scaled Short-Horizon Reversal (Amihud-Conditioned Contrarian)\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral (zero-mean signal)\n- **Parameters:**\n  - `N_rev = 5` \u2014 lookback (days) for the short-horizon reversal return\n  - `N_illiq = 60` \u2014 lookback (days) for the Amihud illiquidity average\n  - `N_dvol = 60` \u2014 lookback (days) for average dollar volume (liquidity filter / universe weighting)\n  - `N_vol = 20` \u2014 lookback (days) for realised volatility used to standardise the reversal return\n  - `N_smooth = 3` \u2014 smoothing span (days) applied to the final cross-sectional signal\n  - `min_frac = 0.8` \u2014 minimum fraction of a rolling window that must be non-missing for the statistic to be defined\n  - `eps = 1e-12` \u2014 floor added to denominators to avoid division by zero\n  - `winsor_z = 3.0` \u2014 symmetric clip level applied to cross-sectional z-scores\n- **Required Inputs:** `close`, `high`, `low`, `volume`, `returns` (daily OHLCV only)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use data up to and including the close of day $t$.\n\n**1. Short-horizon reversal return.**\n\n$$R_{i,t}^{(N_{rev})} = \\prod_{k=0}^{N_{rev}-1}\\left(1 + r_{i,t-k}\\right) - 1$$\n\nwhere $r_{i,t}$ is the daily `returns` field. Requires at least $\\lceil min\\_frac \\cdot N_{rev}\\rceil$ non-missing returns in the window; otherwise undefined (NaN).\n\n**2. Volatility standardisation of the reversal.**\n\n$$\\sigma_{i,t} = \\operatorname{stdev}\\left(\\{r_{i,s}\\}_{s=t-N_{vol}+1}^{t}\\right), \\qquad\n\\tilde R_{i,t} = \\frac{R_{i,t}^{(N_{rev})}}{\\sqrt{N_{rev}}\\,\\sigma_{i,t} + eps}$$\n\nRequires at least $\\lceil min\\_frac \\cdot N_{vol}\\rceil$ non-missing returns; otherwise NaN. The $eps$ floor handles $\\sigma_{i,t}=0$.\n\n**3. Amihud illiquidity (price impact per dollar traded).**\n\nDaily illiquidity:\n\n$$A_{i,t} = \\frac{|r_{i,t}|}{P_{i,t}\\,V_{i,t} + eps}, \\qquad P_{i,t}=\\text{close}_{i,t},\\; V_{i,t}=\\text{volume}_{i,t}$$\n\nRolling average:\n\n$$\\bar A_{i,t} = \\frac{1}{N_{illiq}}\\sum_{k=0}^{N_{illiq}-1} A_{i,t-k}$$\n\nwith minimum $\\lceil min\\_frac \\cdot N_{illiq}\\rceil$ non-missing observations, else NaN. Log transform (strictly positive by construction of $eps$):\n\n$$L_{i,t} = \\ln\\!\\left(\\bar A_{i,t} + eps\\right)$$\n\n**4. Intraday relative spread proxy (secondary liquidity dimension).**\n\n$$S_{i,t} = \\frac{\\text{high}_{i,t}-\\text{low}_{i,t}}{\\text{close}_{i,t} + eps}, \\qquad\n\\bar S_{i,t} = \\frac{1}{N_{dvol}}\\sum_{k=0}^{N_{dvol}-1} S_{i,t-k}$$\n\nwith minimum $\\lceil min\\_frac \\cdot N_{dvol}\\rceil$ observations, else NaN.\n\n**5. Turnover-free liquidity scale (dollar volume).**\n\n$$D_{i,t} = \\frac{1}{N_{dvol}}\\sum_{k=0}^{N_{dvol}-1} \\ln\\!\\left(P_{i,t-k}V_{i,t-k} + 1\\right)$$\n\nwith the same minimum-observation rule.\n\n**6. Cross-sectional standardisation.** For any cross-sectional variable $X_{i,t}$ define, over the set $\\Omega_t$ of symbols with $X_{i,t}$ defined on date $t$,\n\n$$z_t(X)_i = \\operatorname{clip}\\!\\left(\\frac{X_{i,t}-\\mu_t(X)}{s_t(X)+eps},\\,-winsor\\_z,\\,+winsor\\_z\\right)$$\n\nwith $\\mu_t$ and $s_t$ the cross-sectional mean and standard deviation over $\\Omega_t$.\n\n**7. Composite illiquidity score.**\n\n$$\\Lambda_{i,t} = \\tfrac{1}{3}\\Big[\\,z_t(L)_i + z_t(\\bar S)_i - z_t(D)_i\\,\\Big]$$\n\nHigher $\\Lambda$ = more illiquid (higher price impact, wider range proxy, lower dollar volume). $\\Lambda_{i,t}$ is defined only if all three components are defined.\n\n**8. Illiquidity gain (bounded, monotone in $\\Lambda$).**\n\n$$G_{i,t} = \\frac{1}{1+\\exp(-\\Lambda_{i,t})} \\in (0,1)$$\n\n**9. Raw alpha (contrarian, amplified in illiquid names).**\n\n$$\\alpha^{raw}_{i,t} = -\\, z_t\\!\\left(\\tilde R\\right)_i \\cdot G_{i,t}$$\n\n**10. Temporal smoothing.** Exponentially weighted mean per symbol with span $N_{smooth}$, computed on the available (non-missing) history of $\\alpha^{raw}$:\n\n$$\\alpha^{sm}_{i,t} = \\mathrm{EWM}_{span=N_{smooth}}\\!\\left(\\alpha^{raw}_{i,\\cdot}\\right)_t$$\n\n**11. Final cross-sectional neutralisation.**\n\n$$\\alpha_{i,t} = z_t\\!\\left(\\alpha^{sm}\\right)_i$$\n\nThe final signal is zero-mean and unit-variance across the cross-section each date, clipped at $\\pm winsor\\_z$.\n\n**Handling of undefined values (explicit):** rolling statistics use the minimum-count rule $\\lceil min\\_frac \\cdot N\\rceil$ and return NaN otherwise; all denominators carry the additive floor $eps$; dates on which fewer than 2 symbols have a defined value yield NaN for that date (cross-sectional standard deviation undefined). NaNs are propagated, never imputed; a symbol with NaN alpha is simply not traded.\n\n# Section 3: Causal Rationale\n\nMarket makers and other liquidity suppliers must absorb temporary order-flow imbalances, and they demand compensation for doing so; the price concession they extract is mechanically larger where absorbing a given dollar of flow moves the price more. The Amihud ratio $|r|/(P\\cdot V)$, the high\u2013low range scaled by price, and inverse dollar volume are all directly observable daily-OHLCV measures of that price-impact cost, so a stock scoring high on the composite $\\Lambda$ is one where a transient flow shock produces a disproportionate price move. Because such moves reflect the cost of immediacy rather than new information about cash flows, they should be partially reversed as liquidity is replenished over the following days, which motivates taking the negative of the recent $N_{rev}$-day return. Standardising that return by trailing realised volatility ensures the signal measures an abnormal move rather than merely a high-volatility stock, and multiplying by the bounded gain $G$ concentrates exposure in the names where the liquidity-provision premium is largest while retaining a small contrarian tilt in liquid names. Smoothing over $N_{smooth}$ days and cross-sectional standardisation keep the resulting portfolio dollar-neutral and limit turnover attributable to single-day noise in the illiquidity proxies.\n\n# Section 4: Structural Bounds\n\n- **Data:** The strategy uses exclusively point-in-time daily OHLCV data (`close`, `high`, `low`, `volume`) and the derived daily `returns` field. No fundamentals, no analyst data, no intraday data, no index membership, no restated or as-of-revised series are used. All inputs are known at the close of the day to which they are stamped.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is constructed using data available up to and including the market close of day $t$, and the resulting target position is executed at the **OPEN of day $t+1$**. Every term in Section 2 is a function of observations dated $\\le t$; no forward-looking operator, no negative shift, and no same-day-open-to-close information beyond day $t$'s own close is used. The formulation therefore complies with the rule. The `open` column is not used in signal construction, only as the execution price by the harness.\n- **Lag applied by harness:** The returned Series is stamped at date $t$; the one-day execution lag is applied externally and must not be applied twice.\n- **Minimum trailing observations:** The binding constraint is the longest window, $\\max(N_{illiq}, N_{dvol}) = 60$ days with a $min\\_frac = 0.8$ requirement, i.e. at least $\\lceil 0.8 \\times 60 \\rceil = 48$ valid daily observations within a 60-day trailing window. In practice a symbol needs **60 trailing daily observations** before the alpha becomes defined; the smoothing step adds no additional requirement since EWM emits a value from the first non-missing input.\n- **Universe/practical bounds:** Requires at least 2 symbols with defined values on a given date for cross-sectional standardisation. The alpha is intentionally overweight illiquid names; live deployment should cap position size as a fraction of `N_dvol`-day average dollar volume, since realised transaction costs scale with the very quantity the signal loads on.\n- **Turnover:** Expected holding period ~5 days; the EWM smoothing with span `N_smooth = 3` reduces day-to-day position churn.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_rev=5,\n                   N_illiq=60,\n                   N_dvol=60,\n                   N_vol=20,\n                   N_smooth=3,\n                   min_frac=0.8,\n                   eps=1e-12,\n                   winsor_z=3.0):\n\n    data = df.sort_index()\n    g_sym = data.groupby(level='symbol')\n\n    mp_rev = int(np.ceil(min_frac * N_rev))\n    mp_vol = int(np.ceil(min_frac * N_vol))\n    mp_illiq = int(np.ceil(min_frac * N_illiq))\n    mp_dvol = int(np.ceil(min_frac * N_dvol))\n\n    ret = data['close']\n    ret = data['returns']\n\n    # 1. Short-horizon reversal return\n    log1p_r = np.log1p(ret)\n    sum_log = log1p_r.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum()\n    sum_log = sum_log.reset_index(level=0, drop=True).reindex(data.index)\n    R_rev = np.expm1(sum_log)\n\n    # 2. Volatility standardisation\n    sigma = ret.groupby(level='symbol').rolling(N_vol, min_periods=mp_vol).std()\n    sigma = sigma.reset_index(level=0, drop=True).reindex(data.index)\n    R_tilde = R_rev / (np.sqrt(N_rev) * sigma + eps)\n\n    # 3. Amihud illiquidity\n    dollar_vol = data['close'] * data['volume']\n    amihud = ret.abs() / (dollar_vol + eps)\n    A_bar = amihud.groupby(level='symbol').rolling(N_illiq, min_periods=mp_illiq).mean()\n    A_bar = A_bar.reset_index(level=0, drop=True).reindex(data.index)\n    L = np.log(A_bar + eps)\n\n    # 4. Intraday relative range (spread proxy)\n    spread = (data['high'] - data['low']) / (data['close'] + eps)\n    S_bar = spread.groupby(level='symbol').rolling(N_dvol, min_periods=mp_dvol).mean()\n    S_bar = S_bar.reset_index(level=0, drop=True).reindex(data.index)\n\n    # 5. Log dollar volume scale\n    log_dv = np.log(dollar_vol + 1.0)\n    D = log_dv.groupby(level='symbol').rolling(N_dvol, min_periods=mp_dvol).mean()\n    D = D.reset_index(level=0, drop=True).reindex(data.index)\n\n    # 6. Cross-sectional z-scores (clipped)\n    def _cs_z(s):\n        gd = s.groupby(level='date')\n        z = (s - gd.transform('mean')) / (gd.transform('std') + eps)\n        return z.clip(-winsor_z, winsor_z)\n\n    zL = _cs_z(L)\n    zS = _cs_z(S_bar)\n    zD = _cs_z(D)\n    zR = _cs_z(R_tilde)\n\n    # 7-8. Composite illiquidity score and bounded gain\n    Lambda = (zL + zS - zD) / 3.0\n    G = 1.0 / (1.0 + np.exp(-Lambda))\n\n    # 9. Raw contrarian alpha amplified by illiquidity\n    alpha_raw = -zR * G\n\n    # 10. Temporal smoothing (EWM over available history per symbol)\n    alpha_sm = alpha_raw.groupby(level='symbol').apply(\n        lambda x: x.ewm(span=N_smooth, adjust=False, ignore_na=True).mean()\n    )\n    if isinstance(alpha_sm.index, pd.MultiIndex) and alpha_sm.index.nlevels > 2:\n        alpha_sm = alpha_sm.reset_index(level=0, drop=True)\n    alpha_sm = alpha_sm.reindex(data.index)\n\n    # 11. Final cross-sectional neutralisation\n    alpha = _cs_z(alpha_sm)\n\n    return alpha.reindex(df.index).rename('alpha')\n```",
+    "response_sha256": "d61e629eefefc254b4b02ec861b963138d888ca013a418d13c3e2728021083b7",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_illiq",
+            "N_dvol",
+            "N_vol",
+            "N_smooth",
+            "min_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1625,
+            "output_tokens": 5000,
+            "total_tokens": 6625
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}
