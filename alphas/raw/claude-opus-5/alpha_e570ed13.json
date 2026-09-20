@@ -1,0 +1,105 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_e570ed13",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_vsd",
+            "N_ret",
+            "N_illiq",
+            "N_smooth",
+            "min_obs_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-20T23:44:51.067422+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 15,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2002335143,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Shock Reversal with Illiquidity Conditioning (VSR-IC)\n- **Holding Period:** 5 trading days (signal recomputed daily; effective turnover consistent with a ~5-day average holding period)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional demeaned rank score)\n- **Parameters:**\n  - `N_vol = 20` \u2014 lookback for the baseline (median) volume level\n  - `N_vsd = 60` \u2014 lookback for the standard deviation of log-volume used to standardise the volume shock\n  - `N_ret = 5` \u2014 lookback for the cumulative return over which the shock-conditioned reversal is measured\n  - `N_illiq = 20` \u2014 lookback for the Amihud-style illiquidity average\n  - `N_smooth = 3` \u2014 smoothing span (simple moving average) applied to the raw combined score\n  - `min_obs_frac = 0.8` \u2014 minimum fraction of a rolling window that must be non-missing for that window statistic to be defined\n  - `eps = 1e-12` \u2014 numerical floor used to avoid division by zero\n  - `winsor_z = 3.0` \u2014 symmetric clip level applied to the standardised volume shock\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (daily, point-in-time)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use data up to and including the close of day $t$.\n\n**Step 1 \u2014 Log volume and baseline.**\n\n$$v_{i,t} = \\ln\\!\\left(1 + V_{i,t}\\right), \\qquad V_{i,t} = \\text{volume}_{i,t}$$\n\n$$\\bar v_{i,t} = \\operatorname{median}\\left(v_{i,t-N_{vol}+1},\\dots,v_{i,t}\\right)$$\n\n$$\\sigma^{v}_{i,t} = \\operatorname{stdev}\\left(v_{i,t-N_{vsd}+1},\\dots,v_{i,t}\\right) \\quad \\text{(sample standard deviation, ddof} = 1\\text{)}$$\n\n**Step 2 \u2014 Standardised volume shock.**\n\n$$s_{i,t} = \\operatorname{clip}\\!\\left(\\frac{v_{i,t} - \\bar v_{i,t}}{\\max\\left(\\sigma^{v}_{i,t},\\, \\varepsilon\\right)},\\; -\\text{winsor\\_z},\\; +\\text{winsor\\_z}\\right), \\qquad \\varepsilon = \\texttt{eps}$$\n\n$s_{i,t} > 0$ denotes abnormally heavy trading relative to the recent typical level; $s_{i,t}<0$ abnormally light trading.\n\n**Step 3 \u2014 Recent cumulative return.**\n\n$$R_{i,t} = \\prod_{k=0}^{N_{ret}-1}\\left(1 + r_{i,t-k}\\right) - 1$$\n\nwhere $r_{i,t}$ is the `returns` column.\n\n**Step 4 \u2014 Amihud-style illiquidity, made scale-free by cross-sectional ranking.**\n\n$$D_{i,t} = \\text{close}_{i,t}\\cdot V_{i,t} \\quad\\text{(daily dollar volume)}$$\n\n$$A_{i,t} = \\frac{1}{N_{illiq}}\\sum_{k=0}^{N_{illiq}-1} \\frac{\\left|r_{i,t-k}\\right|}{\\max\\left(D_{i,t-k},\\,\\varepsilon\\right)}$$\n\nLet $n_t$ be the number of symbols with a defined $A_{\\cdot,t}$ on date $t$, and let $\\text{rk}_t(\\cdot)$ denote the ascending cross-sectional rank (average ranks for ties) over that set. Define the illiquidity conditioner mapped to $[0.5, 1.5]$:\n\n$$L_{i,t} = \\frac{1}{2} + \\frac{\\text{rk}_t\\!\\left(A_{i,t}\\right) - 1}{\\max\\left(n_t - 1,\\, 1\\right)}$$\n\nSo the most liquid name receives $L = 0.5$ and the least liquid $L = 1.5$.\n\n**Step 5 \u2014 Raw score: shock-conditioned reversal.**\n\n$$g_{i,t} = -\\,\\max\\left(s_{i,t},\\,0\\right)\\cdot R_{i,t}\\cdot L_{i,t}$$\n\nOnly positive volume shocks activate the signal ($\\max(s,0)$); the sign is the negative of the recent return, i.e. a reversal, scaled by shock magnitude and illiquidity rank.\n\n**Step 6 \u2014 Temporal smoothing.**\n\n$$\\tilde g_{i,t} = \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} g_{i,t-k}$$\n\n**Step 7 \u2014 Cross-sectional normalisation to the final alpha.**\n\nLet $m_t$ be the number of symbols with defined $\\tilde g_{\\cdot,t}$ on date $t$. With $\\text{rk}_t$ the ascending cross-sectional rank (ties averaged):\n\n$$u_{i,t} = \\frac{\\text{rk}_t\\!\\left(\\tilde g_{i,t}\\right) - 1}{\\max\\left(m_t - 1,\\, 1\\right)} \\in [0,1]$$\n\n$$\\alpha_{i,t} = u_{i,t} - \\overline{u_{\\cdot,t}}, \\qquad \\overline{u_{\\cdot,t}} = \\frac{1}{m_t}\\sum_{j} u_{j,t}$$\n\n$\\alpha_{i,t}$ is the position score at the close of day $t$: positive = long, negative = short, and $\\sum_i \\alpha_{i,t} = 0$ on every date.\n\n**Handling of undefined values (explicitly part of the formulation):**\n- Every rolling window statistic over window $N$ requires at least $\\lceil \\texttt{min\\_obs\\_frac}\\cdot N\\rceil$ non-missing observations within the window; otherwise the statistic is undefined (NaN) and propagates.\n- All divisions by a quantity that may be zero are floored by $\\varepsilon = \\texttt{eps}$ in the denominator via $\\max(\\cdot,\\varepsilon)$; denominators of rank normalisations are floored by 1 via $\\max(\\cdot,1)$.\n- Missing inputs are not imputed. A symbol with an undefined $\\tilde g_{i,t}$ is excluded from the cross-sectional ranking on date $t$ and its $\\alpha_{i,t}$ remains undefined (NaN), i.e. no position.\n- No other clipping, filling, or replacement is performed beyond the explicit `winsor_z` clip in Step 2.\n\n# Section 3: Causal Rationale\n\nAbnormally heavy trading volume relative to a symbol's own recent baseline is a direct, observable marker that a large amount of the day's price move was absorbed by market-makers and short-horizon liquidity suppliers rather than by patient two-sided interest, and such immediacy must be paid for with a temporary price concession. The construction therefore takes the sign of the recent $N_{ret}$-day cumulative return and reverses it, but only when the standardised log-volume shock is positive, so that quiet drifts \u2014 which are more likely to reflect gradual information incorporation \u2014 are not traded against. Scaling by the magnitude of the volume shock reflects that the size of the required liquidity premium should grow with the size of the unabsorbed order imbalance, for which excess volume is the OHLCV-observable proxy. Conditioning on the Amihud measure $|r|/\\text{dollar volume}$ \u2014 the average price move produced per dollar traded, computed purely from close, volume and returns \u2014 captures that in names where each dollar of trading moves price more, the transient concession component of a given move is mechanically larger and the subsequent reversion correspondingly bigger. Cross-sectional ranking and demeaning ensure the signal expresses only relative liquidity-provision opportunity rather than a directional market or volatility bet, and the $N_{smooth}$-day average limits sensitivity to a single anomalous print.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses exclusively point-in-time daily OHLCV and daily returns. No fundamentals, no analyst data, no index membership, no corporate-action or event data, and no restatement-prone series are used. Prices and volumes are assumed to be split- and dividend-adjusted consistently as of date $t$ using only information available at date $t$.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is constructed using data available up to and including the market close of day $t$, and the resulting position is executed at the **OPEN of day $t+1$**. The formulation complies: every term in Steps 1\u20137 is a function of $\\{\\text{open},\\text{high},\\text{low},\\text{close},\\text{volume},\\text{returns}\\}$ at dates $\\le t$ only. No forward-looking or negative-shift operation appears anywhere. The returned Series is stamped at date $t$; the one-day execution lag is applied by the backtesting harness, not inside the function.\n- **Cross-sectional dependency:** Steps 4 and 7 use contemporaneous cross-sectional ranks over date $t$ only. This is not look-ahead, but it does require the day-$t$ cross-section to be complete at the close of day $t$; it must be computed on the survivorship-unbiased universe as constituted on day $t$.\n- **Minimum trailing observations:** The binding window is $N_{vsd} = 60$ requiring $\\lceil 0.8\\times 60\\rceil = 48$ observations, and the smoothing adds $N_{smooth}-1 = 2$ further days. A symbol therefore requires at minimum **50 trailing daily observations** (and, in the strictest sense, 62 calendar-aligned trading rows so that all windows $N_{vsd}$ and $N_{smooth}$ are fully populated) before $\\alpha_{i,t}$ is defined. Symbols failing this receive NaN and no position.\n- **Other bounds:** The signal is undefined for any date with fewer than 2 symbols in the cross-section. No leverage, sizing, or cost assumptions are embedded in the signal; it is a unit-free, zero-sum cross-sectional score.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_vol=20,\n                   N_vsd=60,\n                   N_ret=5,\n                   N_illiq=20,\n                   N_smooth=3,\n                   min_obs_frac=0.8,\n                   eps=1e-12,\n                   winsor_z=3.0):\n\n    data = df.sort_index()\n\n    mp_vol = int(np.ceil(min_obs_frac * N_vol))\n    mp_vsd = int(np.ceil(min_obs_frac * N_vsd))\n    mp_ret = int(np.ceil(min_obs_frac * N_ret))\n    mp_ill = int(np.ceil(min_obs_frac * N_illiq))\n    mp_sm = int(np.ceil(min_obs_frac * N_smooth))\n\n    v = np.log1p(data['volume'])\n    g_v = v.groupby(level='symbol')\n\n    v_base = g_v.transform(lambda x: x.rolling(N_vol, min_periods=mp_vol).median())\n    v_sd = g_v.transform(lambda x: x.rolling(N_vsd, min_periods=mp_vsd).std(ddof=1))\n\n    s = (v - v_base) / np.maximum(v_sd, eps)\n    s = s.clip(lower=-winsor_z, upper=winsor_z)\n\n    log1p_r = np.log1p(data['returns'])\n    cum = log1p_r.groupby(level='symbol').transform(\n        lambda x: x.rolling(N_ret, min_periods=mp_ret).sum())\n    R = np.expm1(cum)\n\n    dollar_vol = data['close'] * data['volume']\n    ratio = data['returns'].abs() / np.maximum(dollar_vol, eps)\n    A = ratio.groupby(level='symbol').transform(\n        lambda x: x.rolling(N_illiq, min_periods=mp_ill).mean())\n\n    rk_A = A.groupby(level='date').rank(method='average', ascending=True)\n    n_A = A.groupby(level='date').transform('count')\n    L = 0.5 + (rk_A - 1.0) / np.maximum(n_A - 1.0, 1.0)\n\n    s_pos = s.where(s > 0.0, 0.0).where(s.notna())\n\n    g_raw = -s_pos * R * L\n\n    g_sm = g_raw.groupby(level='symbol').transform(\n        lambda x: x.rolling(N_smooth, min_periods=mp_sm).mean())\n\n    rk_g = g_sm.groupby(level='date').rank(method='average', ascending=True)\n    m_t = g_sm.groupby(level='date').transform('count')\n    u = (rk_g - 1.0) / np.maximum(m_t - 1.0, 1.0)\n\n    alpha = u - u.groupby(level='date').transform('mean')\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha_vsr_ic'\n\n    return alpha\n```",
+    "response_sha256": "fc8ce7a471089ce11d130fa60aa2da4094aff6409658d6c050df0aaa18fd99fd",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_vsd",
+            "N_ret",
+            "N_illiq",
+            "N_smooth",
+            "min_obs_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1625,
+            "output_tokens": 4595,
+            "total_tokens": 6220
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

@@ -1,0 +1,111 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_14430022",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_resid",
+            "N_rank",
+            "N_smooth",
+            "MinObs_beta",
+            "MinObs_resid",
+            "MinObs_rank",
+            "Eps_var",
+            "Beta_clip",
+            "Liq_floor"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-20T23:51:43.471166+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 22,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1627731769,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Beta-Conditioned Idiosyncratic Reversal (Downside-Beta Adjusted)\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, dollar-neutral, cross-sectionally ranked\n- **Parameters:**\n  - `N_beta = 120` \u2014 rolling window (days) for estimating market beta\n  - `N_resid = 20` \u2014 rolling window (days) for accumulating idiosyncratic (beta-adjusted) return\n  - `N_rank = 60` \u2014 rolling window (days) used to normalise dollar volume for the liquidity gate\n  - `N_smooth = 3` \u2014 smoothing span (days, simple moving average) applied to the final raw signal\n  - `MinObs_beta = 90` \u2014 minimum non-missing observations required inside the `N_beta` window\n  - `MinObs_resid = 15` \u2014 minimum non-missing observations required inside the `N_resid` window\n  - `MinObs_rank = 40` \u2014 minimum non-missing observations required inside the `N_rank` window\n  - `Eps_var = 1e-12` \u2014 floor applied to the market-return variance denominator in the beta estimate\n  - `Beta_clip = 3.0` \u2014 symmetric absolute clip applied to the estimated beta\n  - `Liq_floor = 0.20` \u2014 cross-sectional percentile of normalised dollar volume below which the signal is suppressed\n- **Required Inputs:** `close`, `volume`, `returns` (all daily, point-in-time). No other inputs.\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. Let $r_{i,t}$ be `returns` (simple daily total return as supplied), $c_{i,t}$ be `close`, $v_{i,t}$ be `volume`.\n\n**Step 1 \u2014 Market proxy.** The market return is the equal-weighted cross-sectional mean of available returns on day $t$:\n\n$$r^{M}_{t} = \\frac{1}{|S_t|}\\sum_{j \\in S_t} r_{j,t}, \\qquad S_t = \\{ j : r_{j,t} \\text{ observed on day } t\\}$$\n\n**Step 2 \u2014 Rolling beta.** Over the trailing window of length `N_beta` ending at $t$ (inclusive of $t$):\n\n$$\\hat\\beta_{i,t} = \\frac{\\mathrm{Cov}_{N\\_beta}\\!\\left(r_{i},\\, r^{M}\\right)_{t}}{\\max\\!\\left(\\mathrm{Var}_{N\\_beta}\\!\\left(r^{M}\\right)_{t},\\; Eps\\_var\\right)}$$\n\nwhere $\\mathrm{Cov}$ and $\\mathrm{Var}$ are sample (denominator $n-1$) rolling moments requiring at least `MinObs_beta` paired non-missing observations; otherwise $\\hat\\beta_{i,t}$ is undefined (NaN). Clipped beta:\n\n$$\\tilde\\beta_{i,t} = \\min\\!\\left(\\max\\!\\left(\\hat\\beta_{i,t},\\, -Beta\\_clip\\right),\\, Beta\\_clip\\right)$$\n\n**Step 3 \u2014 Idiosyncratic daily return.** Using the beta known at the same close (contemporaneous window, no future data):\n\n$$e_{i,t} = r_{i,t} - \\tilde\\beta_{i,t}\\, r^{M}_{t}$$\n\n**Step 4 \u2014 Accumulated idiosyncratic move.** Sum over the trailing `N_resid` days, requiring at least `MinObs_resid` non-missing values:\n\n$$E_{i,t} = \\sum_{k=0}^{N\\_resid-1} e_{i,t-k}$$\n\n**Step 5 \u2014 Dispersion scaling.** Rolling standard deviation of $e$ over the same window, same minimum count:\n\n$$\\sigma^{e}_{i,t} = \\mathrm{Std}_{N\\_resid}\\!\\left(e_{i}\\right)_{t}$$\n\n$$Z_{i,t} = \\begin{cases} \\dfrac{E_{i,t}}{\\sigma^{e}_{i,t}\\sqrt{N\\_resid}} & \\sigma^{e}_{i,t} > 0 \\\\[6pt] \\text{undefined (NaN)} & \\sigma^{e}_{i,t} = 0 \\text{ or undefined} \\end{cases}$$\n\n**Step 6 \u2014 Beta tilt.** Define the cross-sectional standardised beta on day $t$ over the set $B_t$ of symbols with defined $\\tilde\\beta$:\n\n$$b_{i,t} = \\frac{\\tilde\\beta_{i,t} - \\mathrm{mean}_{j \\in B_t}\\left(\\tilde\\beta_{j,t}\\right)}{\\mathrm{std}_{j\\in B_t}\\left(\\tilde\\beta_{j,t}\\right)}, \\quad \\text{undefined if the cross-sectional std is } 0$$\n\nThe raw signal combines idiosyncratic reversal with a low-beta tilt:\n\n$$g_{i,t} = -\\,Z_{i,t} \\;-\\; b_{i,t}$$\n\n**Step 7 \u2014 Liquidity gate.** Dollar volume $d_{i,t} = c_{i,t}\\, v_{i,t}$. Its trailing normalisation over `N_rank` days (minimum `MinObs_rank` observations) is the within-window percentile rank of the current value:\n\n$$q_{i,t} = \\frac{\\#\\{k \\in [0, N\\_rank-1] : d_{i,t-k} \\le d_{i,t}\\}}{\\#\\{k \\in [0,N\\_rank-1] : d_{i,t-k} \\text{ observed}\\}}$$\n\nCross-sectional gate on day $t$: let $p_{i,t}$ be the cross-sectional percentile rank (in $[0,1]$) of $q_{i,t}$ among symbols with $q$ defined. Then\n\n$$m_{i,t} = \\mathbb{1}\\{ p_{i,t} \\ge Liq\\_floor \\}$$\n\nand the gated signal is\n\n$$h_{i,t} = \\begin{cases} g_{i,t} & m_{i,t} = 1 \\text{ and } g_{i,t} \\text{ defined} \\\\ \\text{undefined (NaN)} & \\text{otherwise} \\end{cases}$$\n\n**Step 8 \u2014 Smoothing and final cross-sectional normalisation.** Time-series simple moving average over `N_smooth` days, requiring at least `N_smooth` observations:\n\n$$\\bar h_{i,t} = \\frac{1}{N\\_smooth}\\sum_{k=0}^{N\\_smooth-1} h_{i,t-k}$$\n\nFinal alpha is the cross-sectional demeaned percentile rank on day $t$ over the set $H_t$ of symbols with $\\bar h$ defined:\n\n$$\\alpha_{i,t} = \\mathrm{rank}_{j \\in H_t}\\!\\left(\\bar h_{i,t}\\right) \\Big/ |H_t| \\;-\\; \\tfrac{1}{2}$$\n\n**Undefined-value handling (explicit).** All rolling operations enforce the stated minimum observation counts and return NaN otherwise. Division by the market-variance term is floored at `Eps_var`; division by $\\sigma^e$ and by the cross-sectional beta std returns NaN when the denominator is zero. Missing observations are never imputed or filled; symbols with NaN at any stage carry NaN forward to $\\alpha_{i,t}$ and are simply excluded from that day's cross-section. No clipping is applied other than `Beta_clip`. Non-finite values arising anywhere are treated as NaN.\n\n# Section 3: Causal Rationale\n\nBeta measured from daily returns is the sensitivity of a stock's close-to-close return to the cross-sectional average return, and it mechanically explains a large share of short-horizon price movement; raw multi-week price moves therefore conflate common market drift with stock-specific dislocation. By subtracting $\\tilde\\beta_{i,t} r^{M}_{t}$ day by day, the accumulated residual $E_{i,t}$ isolates the component of a stock's recent move that is not attributable to its market exposure, and it is this idiosyncratic component \u2014 typically driven by transient liquidity demand rather than market-wide repricing \u2014 that is most prone to short-horizon reversal as liquidity providers are compensated and inventories are unwound. Scaling by the stock's own residual dispersion puts high- and low-volatility names on a comparable dislocation scale so the cross-sectional ranking is not merely a volatility sort. The additive low-beta tilt reflects the leverage-constraint mechanism: agents seeking amplified market exposure without borrowing bid up high-beta names, so a portfolio short high measured beta and long low measured beta earns the associated risk premium while also partially neutralising the residual market exposure of the reversal leg. The liquidity gate, proxied by close \u00d7 volume percentile, restricts the universe to names where the residual estimate is not dominated by stale or thin-print noise.\n\n# Section 4: Structural Bounds\n\n- **Data:** Only point-in-time daily OHLCV and returns are used (`close`, `volume`, `returns`). No fundamentals, no index membership, no analyst or corporate-action data. The market proxy is constructed from the same cross-section, so it is PIT by construction, though it is subject to whatever survivorship properties the supplied universe has \u2014 no forward-looking universe selection is performed inside the signal.\n- **Execution timing:** The signal for date $t$ uses only data observed up to and including the market close of day $t$, and is executed at the OPEN of day $t+1$. Every rolling and cross-sectional operation in Section 2 is backward-looking and inclusive of $t$ only; no negative shifts are used. The formulation complies with this rule. The backtest harness, not the function, applies the one-day execution lag.\n- **Minimum trailing observations:** The binding constraint is the beta window: `MinObs_beta = 90` observations within a `N_beta = 120` day window, followed by `N_resid = 20` days of residuals and `N_smooth = 3` days of smoothing. In the worst case the signal is first defined at trailing observation number $N\\_beta + N\\_resid + N\\_smooth - 2 = 141$; the theoretical minimum given the min-obs settings is $MinObs\\_beta + MinObs\\_resid + N\\_smooth - 2 = 106$. A conservative requirement of **141 trailing daily observations** per symbol is stated.\n- **Other bounds:** Signal is cross-sectionally centred (mean zero by construction of the demeaned rank), implying a dollar-neutral book. The alpha is not neutralised to beta ex post; residual beta exposure should be handled by the portfolio construction layer if required. Requires a cross-section of at least 2 symbols per date for the market proxy and cross-sectional standardisation to be meaningful; the low-beta tilt is undefined when cross-sectional beta dispersion is zero.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_beta=120,\n                   N_resid=20,\n                   N_rank=60,\n                   N_smooth=3,\n                   MinObs_beta=90,\n                   MinObs_resid=15,\n                   MinObs_rank=40,\n                   Eps_var=1e-12,\n                   Beta_clip=3.0,\n                   Liq_floor=0.20):\n\n    data = df.sort_index()\n\n    r = data['returns']\n    c = data['close']\n    v = data['volume']\n\n    # Step 1: equal-weighted market return per date\n    mkt_by_date = r.groupby(level='date').mean()\n    rm = pd.Series(mkt_by_date.reindex(data.index.get_level_values('date')).values,\n                   index=data.index, name='rm')\n\n    g_sym = lambda s: s.groupby(level='symbol')\n\n    # Step 2: rolling beta\n    cov = g_sym(r).rolling(N_beta, min_periods=MinObs_beta).cov(rm).reset_index(level=0, drop=True)\n    cov = cov.reindex(data.index)\n    var_m = g_sym(rm).rolling(N_beta, min_periods=MinObs_beta).var().reset_index(level=0, drop=True)\n    var_m = var_m.reindex(data.index)\n\n    beta = cov / np.maximum(var_m, Eps_var)\n    beta = beta.replace([np.inf, -np.inf], np.nan)\n    beta = beta.clip(lower=-Beta_clip, upper=Beta_clip)\n\n    # Step 3: idiosyncratic daily return\n    e = r - beta * rm\n\n    # Steps 4-5: accumulated residual scaled by residual dispersion\n    E = g_sym(e).rolling(N_resid, min_periods=MinObs_resid).sum().reset_index(level=0, drop=True).reindex(data.index)\n    sd = g_sym(e).rolling(N_resid, min_periods=MinObs_resid).std().reset_index(level=0, drop=True).reindex(data.index)\n    sd = sd.where(sd > 0.0)\n\n    Z = E / (sd * np.sqrt(N_resid))\n    Z = Z.replace([np.inf, -np.inf], np.nan)\n\n    # Step 6: cross-sectional standardised beta and raw signal\n    b_mean = beta.groupby(level='date').transform('mean')\n    b_std = beta.groupby(level='date').transform('std')\n    b_std = b_std.where(b_std > 0.0)\n    b_cs = (beta - b_mean) / b_std\n    b_cs = b_cs.replace([np.inf, -np.inf], np.nan)\n\n    g_raw = -Z - b_cs\n\n    # Step 7: liquidity gate\n    dv = c * v\n    q = (g_sym(dv)\n         .rolling(N_rank, min_periods=MinObs_rank)\n         .apply(lambda w: (w <= w[-1]).sum() / len(w), raw=True)\n         .reset_index(level=0, drop=True).reindex(data.index))\n\n    p = q.groupby(level='date').rank(pct=True)\n    mask = p >= Liq_floor\n\n    h = g_raw.where(mask)\n\n    # Step 8: smoothing and final cross-sectional demeaned rank\n    h_bar = g_sym(h).rolling(N_smooth, min_periods=N_smooth).mean().reset_index(level=0, drop=True).reindex(data.index)\n    h_bar = h_bar.replace([np.inf, -np.inf], np.nan)\n\n    alpha = h_bar.groupby(level='date').rank(pct=True) - 0.5\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "0f0a6df2e2cc9c07a68c3fc7697629ccdf576f9e18d62a3e4c18bb66e8f3cf03",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_resid",
+            "N_rank",
+            "N_smooth",
+            "MinObs_beta",
+            "MinObs_resid",
+            "MinObs_rank",
+            "Eps_var",
+            "Beta_clip",
+            "Liq_floor"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1623,
+            "output_tokens": 5070,
+            "total_tokens": 6693
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

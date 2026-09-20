@@ -1,0 +1,113 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_e2ffe6bb",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_skip",
+            "N_path",
+            "N_vol",
+            "N_dollar_fast",
+            "N_dollar_slow",
+            "N_smooth",
+            "W_mom",
+            "W_path",
+            "W_vol",
+            "EPS",
+            "MIN_FRAC"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-20T23:29:39.907779+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 0,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1243873348,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed Intermediate Momentum with Path-Smoothness Filter (VCIM-PS)\n- **Holding Period:** 10 trading days (signal recomputed daily; positions turned over on a ~10-day effective horizon)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional z-score of ranks)\n- **Parameters:**\n  - `N_mom = 126` \u2014 total lookback for intermediate momentum measurement\n  - `N_skip = 21` \u2014 recent window skipped to avoid short-horizon reversal\n  - `N_path = 126` \u2014 window for path-smoothness (fraction of positive-return days)\n  - `N_vol = 63` \u2014 window for realised volatility used to risk-scale momentum\n  - `N_dollar_fast = 21` \u2014 fast window for dollar-volume trend\n  - `N_dollar_slow = 126` \u2014 slow window for dollar-volume trend\n  - `N_smooth = 5` \u2014 smoothing window applied to the final composite score\n  - `W_mom = 0.50` \u2014 weight on risk-scaled momentum component\n  - `W_path = 0.30` \u2014 weight on path-smoothness component\n  - `W_vol = 0.20` \u2014 weight on volume-confirmation component\n  - `EPS = 1e-12` \u2014 numerical floor to prevent division by zero\n  - `MIN_FRAC = 0.8` \u2014 minimum fraction of a rolling window that must be non-missing\n- **Required Inputs:** `close`, `volume`, `returns` (all daily, PIT). No other inputs used.\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. Let $P_{i,t}$ = `close`, $V_{i,t}$ = `volume`, $r_{i,t}$ = `returns` (simple daily return).\n\n**Step 1 \u2014 Skip-period intermediate momentum.**\n\n$$\nM_{i,t} \\;=\\; \\frac{P_{i,t-N_{skip}}}{P_{i,t-N_{mom}}} \\;-\\; 1\n$$\n\nRequires $P_{i,t-N_{mom}}$ and $P_{i,t-N_{skip}}$ to be observed. If $P_{i,t-N_{mom}} = 0$ or missing, $M_{i,t}$ is undefined (NaN).\n\n**Step 2 \u2014 Realised volatility (risk scaling).**\n\n$$\n\\sigma_{i,t} \\;=\\; \\sqrt{\\frac{1}{N_{vol}-1}\\sum_{k=0}^{N_{vol}-1}\\bigl(r_{i,t-k}-\\bar r_{i,t}\\bigr)^{2}},\n\\qquad\n\\bar r_{i,t}=\\frac{1}{N_{vol}}\\sum_{k=0}^{N_{vol}-1} r_{i,t-k}\n$$\n\ncomputed with a minimum of $\\lceil \\texttt{MIN\\_FRAC}\\cdot N_{vol}\\rceil$ non-missing observations; otherwise NaN.\n\n**Step 3 \u2014 Risk-scaled momentum.**\n\n$$\n\\widetilde{M}_{i,t} \\;=\\; \\frac{M_{i,t}}{\\sigma_{i,t}\\sqrt{N_{mom}-N_{skip}} \\;+\\; \\texttt{EPS}}\n$$\n\nThe additive $\\texttt{EPS}$ is the sole division-by-zero handling.\n\n**Step 4 \u2014 Path smoothness (consistency of the trend).**\n\nOver the same effective window, define the fraction of up-days, centred:\n\n$$\nS_{i,t} \\;=\\; \\frac{1}{N_{path}-N_{skip}}\\sum_{k=N_{skip}}^{N_{path}-1}\\mathbf{1}\\{r_{i,t-k}>0\\} \\;-\\; \\tfrac{1}{2}\n$$\n\nImplemented as a rolling mean of $\\mathbf{1}\\{r>0\\}$ over $N_{path}-N_{skip}$ observations applied to the series lagged by $N_{skip}$ days, with minimum $\\lceil \\texttt{MIN\\_FRAC}\\cdot (N_{path}-N_{skip})\\rceil$ non-missing observations. Missing returns are excluded from the mean (they do not count as up-days).\n\n**Step 5 \u2014 Volume confirmation (dollar-volume trend).**\n\n$$\nD_{i,t} \\;=\\; P_{i,t}\\,V_{i,t},\n\\qquad\n\\overline{D}^{f}_{i,t}=\\frac{1}{N_{df}}\\sum_{k=0}^{N_{df}-1} D_{i,t-k},\n\\qquad\n\\overline{D}^{s}_{i,t}=\\frac{1}{N_{ds}}\\sum_{k=0}^{N_{ds}-1} D_{i,t-k}\n$$\n\nwith $N_{df}=N_{dollar\\_fast}$, $N_{ds}=N_{dollar\\_slow}$, each requiring $\\lceil \\texttt{MIN\\_FRAC}\\cdot N\\rceil$ non-missing observations.\n\n$$\nG_{i,t} \\;=\\; \\log\\!\\left(\\frac{\\overline{D}^{f}_{i,t}+\\texttt{EPS}}{\\overline{D}^{s}_{i,t}+\\texttt{EPS}}\\right)\n$$\n\nThe volume term enters **signed by the direction of momentum**, so that expanding turnover confirms (rather than blindly adds to) the trend:\n\n$$\nC_{i,t} \\;=\\; \\operatorname{sign}\\!\\bigl(M_{i,t}\\bigr)\\cdot G_{i,t},\n\\qquad \\operatorname{sign}(0)=0\n$$\n\n**Step 6 \u2014 Cross-sectional normalisation of each component.**\n\nFor any cross-sectional variable $X_{i,t}$ defined on the set $\\Omega_t$ of symbols with $X$ non-missing on day $t$, with $n_t=|\\Omega_t|$, let $\\mathrm{rk}(X_{i,t})\\in\\{1,\\dots,n_t\\}$ be the ascending ordinal rank (ties averaged), and define\n\n$$\nZ(X_{i,t}) \\;=\\; \\Phi_{\\text{unif}}\\bigl(X_{i,t}\\bigr)\\;=\\;\\frac{\\mathrm{rk}(X_{i,t})}{n_t+1}-\\tfrac{1}{2}\n$$\n\n$Z$ is NaN where $X$ is NaN. Days with $n_t<2$ yield NaN for all symbols on that day.\n\n**Step 7 \u2014 Composite score.**\n\n$$\nA_{i,t} \\;=\\; W_{mom}\\,Z(\\widetilde{M}_{i,t}) \\;+\\; W_{path}\\,Z(S_{i,t}) \\;+\\; W_{vol}\\,Z(C_{i,t})\n$$\n\n$A_{i,t}$ is NaN if any of the three components is NaN (no imputation of missing components).\n\n**Step 8 \u2014 Temporal smoothing and final cross-sectional standardisation.**\n\n$$\n\\bar A_{i,t} \\;=\\; \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} A_{i,t-k}\n$$\n\nrequiring $\\lceil \\texttt{MIN\\_FRAC}\\cdot N_{smooth}\\rceil$ non-missing observations, else NaN.\n\n$$\n\\alpha_{i,t} \\;=\\; \\frac{\\bar A_{i,t} - \\mu_t}{s_t + \\texttt{EPS}},\n\\qquad\n\\mu_t = \\frac{1}{n_t}\\sum_{j\\in\\Omega_t}\\bar A_{j,t},\n\\qquad\ns_t = \\sqrt{\\frac{1}{n_t-1}\\sum_{j\\in\\Omega_t}\\bigl(\\bar A_{j,t}-\\mu_t\\bigr)^2}\n$$\n\nover the set $\\Omega_t$ of symbols with $\\bar A$ non-missing. Days with $n_t<2$ give NaN.\n\n**Explicit undefined-value handling:** (i) all rolling windows use the stated minimum-observation counts; (ii) all divisions use an additive `EPS` floor; (iii) missing inputs propagate to NaN \u2014 no forward-filling, no zero-filling, no clipping, no winsorisation is performed anywhere.\n\n# Section 3: Causal Rationale\n\nMomentum in equities reflects gradual incorporation of information into prices: after a genuine shift in a firm's prospects, prices drift in the direction of the initial move because attention and reallocation occur over weeks, not instantaneously, so the past 6-month price change excluding the most recent month is informative about the next several weeks' return. The most recent month is skipped because short-horizon price changes are dominated by liquidity provision and bid-ask/inventory effects that mechanically reverse, contaminating the drift signal. Risk-scaling momentum by trailing realised return volatility puts stocks on a comparable \"information per unit of noise\" footing, so that a 20% move in a quiet name is not treated as equivalent to a 20% move in an erratic one. The path-smoothness term (fraction of up-days over the same window) distinguishes a steady drift \u2014 consistent with slow diffusion of information \u2014 from a single large jump whose effect has already been priced; steady paths are also less salient day-to-day and therefore plausibly under-reacted to. Finally, dollar volume (price times share volume) is the only observable proxy available here for the intensity of trading behind the move: momentum accompanied by rising trailing turnover indicates the move is being transacted, not drifting on thin quotes, so the volume-trend term is signed by the direction of momentum and rewards trend-consistent turnover expansion while penalising trends running on shrinking activity.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses only daily `close`, `volume`, and `returns`, all strictly point-in-time. No fundamentals, no analyst data, no index membership, no corporate-action look-ahead, no intraday data. Prices and returns are assumed split- and dividend-adjusted as of day $t$ using only information available at day $t$'s close.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is constructed using data available up to and including the market close of day $t$, and is executed at the **open of day $t+1$**. Every term in Section 2 references only observations at indices $\\le t$; no negative shifts are used. The formulation therefore complies with this rule. The returned Series is aligned to date $t$; the one-day execution lag is applied externally by the harness.\n- **Minimum trailing observations:** The binding constraint is $M_{i,t}$, which requires the close from $N_{mom}=126$ trading days ago, plus the $N_{smooth}=5$ smoothing window. The signal is therefore first defined on the **$131^{\\text{st}}$ trailing observation** for a symbol ($N_{mom} + N_{smooth} = 131$). Rolling components additionally require their `MIN_FRAC`-based minimum counts to be met.\n- **Universe/other bounds:** Requires at least 2 symbols with valid values on a given date for cross-sectional normalisation. The signal is undefined (NaN) for symbols with missing closes at the required lags, non-positive prices, or zero dollar volume history exceeding the tolerated missing fraction. The strategy is intended for liquid US common equities; no leverage, sizing, or cost model is specified here.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_mom=126,\n                   N_skip=21,\n                   N_path=126,\n                   N_vol=63,\n                   N_dollar_fast=21,\n                   N_dollar_slow=126,\n                   N_smooth=5,\n                   W_mom=0.50,\n                   W_path=0.30,\n                   W_vol=0.20,\n                   EPS=1e-12,\n                   MIN_FRAC=0.8):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    close = data['close']\n    volume = data['volume']\n    rets = data['returns']\n\n    # Step 1: skip-period intermediate momentum\n    p_skip = close.groupby(level='symbol').shift(N_skip)\n    p_mom = close.groupby(level='symbol').shift(N_mom)\n    M = p_skip / p_mom - 1.0\n\n    # Step 2: realised volatility\n    mp_vol = int(np.ceil(MIN_FRAC * N_vol))\n    sigma = rets.groupby(level='symbol').rolling(N_vol, min_periods=mp_vol).std(ddof=1)\n    sigma = sigma.reset_index(level=0, drop=True).reindex(data.index)\n\n    # Step 3: risk-scaled momentum\n    M_tilde = M / (sigma * np.sqrt(N_mom - N_skip) + EPS)\n\n    # Step 4: path smoothness\n    up = (rets > 0).astype(float).where(rets.notna())\n    up_lag = up.groupby(level='symbol').shift(N_skip)\n    W_path_len = N_path - N_skip\n    mp_path = int(np.ceil(MIN_FRAC * W_path_len))\n    S = up_lag.groupby(level='symbol').rolling(W_path_len, min_periods=mp_path).mean()\n    S = S.reset_index(level=0, drop=True).reindex(data.index) - 0.5\n\n    # Step 5: volume confirmation\n    D = close * volume\n    mp_df = int(np.ceil(MIN_FRAC * N_dollar_fast))\n    mp_ds = int(np.ceil(MIN_FRAC * N_dollar_slow))\n    D_fast = D.groupby(level='symbol').rolling(N_dollar_fast, min_periods=mp_df).mean()\n    D_fast = D_fast.reset_index(level=0, drop=True).reindex(data.index)\n    D_slow = D.groupby(level='symbol').rolling(N_dollar_slow, min_periods=mp_ds).mean()\n    D_slow = D_slow.reset_index(level=0, drop=True).reindex(data.index)\n    G = np.log((D_fast + EPS) / (D_slow + EPS))\n    C = np.sign(M) * G\n\n    # Step 6: cross-sectional uniform-rank normalisation of each component\n    comps = pd.DataFrame({'m': M_tilde, 's': S, 'c': C}, index=data.index)\n    ranked = comps.groupby(level='date').rank(method='average', ascending=True)\n    counts = comps.groupby(level='date').transform('count')\n    valid_day = comps.groupby(level='date').transform('count') >= 2\n    Z = (ranked.div(counts + 1.0) - 0.5).where(valid_day)\n\n    # Step 7: composite\n    A = W_mom * Z['m'] + W_path * Z['s'] + W_vol * Z['c']\n\n    # Step 8: temporal smoothing then cross-sectional standardisation\n    mp_sm = int(np.ceil(MIN_FRAC * N_smooth))\n    A_bar = A.groupby(level='symbol').rolling(N_smooth, min_periods=mp_sm).mean()\n    A_bar = A_bar.reset_index(level=0, drop=True).reindex(data.index)\n\n    grp = A_bar.groupby(level='date')\n    mu = grp.transform('mean')\n    sd = grp.transform('std')\n    n_valid = grp.transform('count')\n    alpha = ((A_bar - mu) / (sd + EPS)).where(n_valid >= 2)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha_vcim_ps'\n    return alpha\n```",
+    "response_sha256": "4cbfd40bc48c3dbaba91173ea8cb23890934a7e0ea67b56dc51a2770ff48b18f",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_skip",
+            "N_path",
+            "N_vol",
+            "N_dollar_fast",
+            "N_dollar_slow",
+            "N_smooth",
+            "W_mom",
+            "W_path",
+            "W_vol",
+            "EPS",
+            "MIN_FRAC"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [
+            "float"
+        ],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1624,
+            "output_tokens": 5421,
+            "total_tokens": 7045
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

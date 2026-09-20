@@ -1,0 +1,107 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_508fadfe",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_range_fast",
+            "N_range_slow",
+            "N_ret_vol",
+            "N_move",
+            "N_smooth",
+            "N_liq",
+            "eps",
+            "winsor_z",
+            "min_obs_frac"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-20T23:38:57.729897+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 9,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1385205569,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Intraday-to-Close Volatility Compression Reversal (Range Contraction Conditioned on Volume-Normalised Displacement)\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral (rank-demeaned)\n- **Parameters:**\n  - `N_range_fast = 5` (short window for average normalised true range)\n  - `N_range_slow = 60` (long window for average normalised true range, defines the volatility regime baseline)\n  - `N_ret_vol = 20` (window for close-to-close return volatility)\n  - `N_move = 5` (window over which cumulative price displacement is measured)\n  - `N_smooth = 3` (smoothing window applied to the raw composite score)\n  - `N_liq = 20` (window for dollar-volume liquidity filter)\n  - `eps = 1e-12` (numerical floor to prevent division by zero)\n  - `winsor_z = 4.0` (absolute clip level applied to the standardised volatility-compression term)\n  - `min_obs_frac = 1.0` (fraction of each rolling window that must be non-missing; 1.0 = full window required)\n- **Required Inputs:** `high`, `low`, `close`, `open`, `volume`, `returns` (daily OHLCV only)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days.\n\n**Step 1 \u2014 Normalised true range (intraday realised volatility proxy).**\n\n$$\nTR_{i,t} = \\max\\left(H_{i,t}-L_{i,t},\\; \\left|H_{i,t}-C_{i,t-1}\\right|,\\; \\left|L_{i,t}-C_{i,t-1}\\right|\\right)\n$$\n\n$$\nr_{i,t} = \\frac{TR_{i,t}}{\\max\\left(C_{i,t-1},\\; \\texttt{eps}\\right)}\n$$\n\nwhere $H,L,C$ are daily high, low, close. $r_{i,t}$ is undefined at the first observation of a symbol (no $C_{i,t-1}$) and is left missing.\n\n**Step 2 \u2014 Volatility compression ratio.**\n\n$$\n\\overline{r}^{\\,f}_{i,t} = \\frac{1}{N_{\\text{range\\_fast}}}\\sum_{k=0}^{N_{\\text{range\\_fast}}-1} r_{i,t-k},\n\\qquad\n\\overline{r}^{\\,s}_{i,t} = \\frac{1}{N_{\\text{range\\_slow}}}\\sum_{k=0}^{N_{\\text{range\\_slow}}-1} r_{i,t-k}\n$$\n\n$$\nK_{i,t} = \\ln\\!\\left(\\frac{\\max(\\overline{r}^{\\,f}_{i,t},\\,\\texttt{eps})}{\\max(\\overline{r}^{\\,s}_{i,t},\\,\\texttt{eps})}\\right)\n$$\n\n$K_{i,t} < 0$ denotes contraction of recent intraday ranges relative to the symbol's own 60-day baseline; $K_{i,t}>0$ denotes expansion.\n\n**Step 3 \u2014 Cross-sectional standardisation and winsorisation of the compression term.**\n\nFor each date $t$, over the cross-section $\\mathcal{S}_t$ of symbols with $K_{i,t}$ defined:\n\n$$\nz^{K}_{i,t} = \\frac{K_{i,t} - \\mu^{K}_t}{\\max(\\sigma^{K}_t,\\,\\texttt{eps})},\n\\qquad\n\\mu^{K}_t = \\frac{1}{|\\mathcal{S}_t|}\\sum_{j\\in\\mathcal{S}_t} K_{j,t},\n\\quad\n\\sigma^{K}_t = \\sqrt{\\frac{1}{|\\mathcal{S}_t|}\\sum_{j\\in\\mathcal{S}_t}\\left(K_{j,t}-\\mu^{K}_t\\right)^2}\n$$\n\n$$\n\\tilde{z}^{K}_{i,t} = \\min\\left(\\max\\left(z^{K}_{i,t},\\,-\\texttt{winsor\\_z}\\right),\\,\\texttt{winsor\\_z}\\right)\n$$\n\n**Step 4 \u2014 Volatility-normalised recent displacement.**\n\nClose-to-close return volatility:\n\n$$\n\\sigma^{ret}_{i,t} = \\sqrt{\\frac{1}{N_{\\text{ret\\_vol}}-1}\\sum_{k=0}^{N_{\\text{ret\\_vol}}-1}\\left(R_{i,t-k}-\\bar{R}_{i,t}\\right)^2},\n\\qquad \\bar{R}_{i,t}=\\frac{1}{N_{\\text{ret\\_vol}}}\\sum_{k=0}^{N_{\\text{ret\\_vol}}-1}R_{i,t-k}\n$$\n\nwhere $R_{i,t}$ is the `returns` column.\n\nCumulative displacement over the last $N_{\\text{move}}$ days, scaled by risk:\n\n$$\nM_{i,t} = \\frac{\\displaystyle\\sum_{k=0}^{N_{\\text{move}}-1} R_{i,t-k}}{\\max\\left(\\sigma^{ret}_{i,t}\\cdot\\sqrt{N_{\\text{move}}},\\;\\texttt{eps}\\right)}\n$$\n\nCross-sectional rank of displacement, mapped to $[-1,1]$ (ties averaged; $n_t=|\\mathcal{S}^M_t|$ = number of symbols with $M$ defined on date $t$):\n\n$$\nu^{M}_{i,t} = 2\\cdot\\frac{\\operatorname{rank}_{t}(M_{i,t}) - 1}{\\max(n_t - 1,\\,1)} - 1\n$$\n\n**Step 5 \u2014 Raw composite score.**\n\n$$\nS^{raw}_{i,t} = -\\,u^{M}_{i,t}\\cdot\\left(-\\,\\tilde{z}^{K}_{i,t}\\right) \\;=\\; u^{M}_{i,t}\\cdot\\tilde{z}^{K}_{i,t}\n$$\n\nInterpretation: when ranges have compressed ($\\tilde{z}^{K}<0$) the score is the *negative* of the recent displacement rank (a reversal bet); when ranges have expanded ($\\tilde{z}^{K}>0$) the score is the *positive* displacement rank (a continuation bet), with magnitude scaled by the degree of compression/expansion.\n\n**Step 6 \u2014 Temporal smoothing.**\n\n$$\nS^{sm}_{i,t} = \\frac{1}{N_{\\text{smooth}}}\\sum_{k=0}^{N_{\\text{smooth}}-1} S^{raw}_{i,t-k}\n$$\n\n**Step 7 \u2014 Liquidity eligibility.**\n\n$$\nD_{i,t} = \\frac{1}{N_{\\text{liq}}}\\sum_{k=0}^{N_{\\text{liq}}-1} C_{i,t-k}\\cdot V_{i,t-k}\n$$\n\nSymbol $i$ is eligible on date $t$ iff $D_{i,t}$ is defined and $D_{i,t} > 0$. Ineligible symbols receive a missing signal and are excluded from the final cross-sectional step.\n\n**Step 8 \u2014 Final signal: cross-sectional rank-demeaning.**\n\nFor each date $t$, over eligible symbols with $S^{sm}_{i,t}$ defined ($m_t$ of them):\n\n$$\nA_{i,t} = 2\\cdot\\frac{\\operatorname{rank}_{t}\\!\\left(S^{sm}_{i,t}\\right)-1}{\\max(m_t-1,\\,1)} - 1\n$$\n\n$A_{i,t}$ is the alpha, bounded in $[-1,1]$ and approximately zero-mean cross-sectionally.\n\n**Handling of undefined values (explicit).**\n- All rolling windows in Steps 2, 4, 6, 7 require a full window of non-missing observations (`min_obs_frac = 1.0`, i.e. `min_periods` equal to the window length). Outputs are missing otherwise.\n- All divisions are floored by `eps` in the denominator as written above; no division by zero occurs.\n- Rank normalisation denominators use $\\max(n-1,1)$, so a single-name cross-section yields a defined value.\n- Missing input observations propagate to missing signal values; no imputation or filling is performed at any stage.\n- Winsorisation is applied only to $z^K$ at $\\pm$`winsor_z` as stated in Step 3; no other clipping occurs.\n\n# Section 3: Causal Rationale\n\nDaily high\u2013low true range is a direct, observable measure of the amount of price disagreement resolved within a session, and its ratio to the same symbol's longer-run average range identifies whether the stock is currently in a quiet or an agitated state. In quiet, range-compressed states the recent multi-day price displacement is disproportionately composed of transitory liquidity pressure rather than information arrival \u2014 there is little intraday range being expended to establish new price levels \u2014 so that displacement is more likely to be given back, motivating the reversal leg. Conversely, when recent ranges are wide relative to the symbol's own baseline, price movement is accompanied by genuine intraday repricing and a wider distribution of transaction prices, conditions under which the market is still absorbing information and displacement more plausibly extends, motivating the continuation leg. Scaling the displacement by trailing close-to-close return volatility puts high- and low-volatility names on a comparable footing so the cross-sectional ranking reflects abnormal movement rather than the raw volatility level. The volume-based screen uses trailing average dollar volume purely to exclude names where the range and return measures are dominated by discreteness and non-trading rather than by any economic content.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses exclusively point-in-time daily OHLCV data (`open`, `high`, `low`, `close`, `volume`, `returns`). No fundamentals, no analyst data, no index membership, no corporate-action look-ahead. It is assumed the OHLCV and `returns` series are adjusted for splits/dividends as of each point in time; no restatement of history is used.\n- **Execution timing (fixed rule):** The signal for day $t$ is computed using data available only up to and including the market close of day $t$, and is executed at the **open of day $t+1$**. Every term in Section 2 references only $t, t-1, \\dots$; no negative shift, no forward-looking operator, and no same-day open-to-close conditioning beyond the close of $t$ is used. The formulation therefore complies with the rule. The implementation returns the signal aligned to date $t$; the execution lag is applied by the harness.\n- **Minimum trailing observations:** The binding constraint is $\\overline{r}^{\\,s}$ (needs `N_range_slow = 60` values of $r$, which itself consumes one prior close) combined with the smoothing window. Required history per symbol:\n  $$\n  N_{\\min} = 1 + N_{\\text{range\\_slow}} + N_{\\text{smooth}} - 1 = 1 + 60 + 3 - 1 = \\mathbf{63}\\ \\text{daily bars}\n  $$\n  A symbol produces no signal until it has at least 63 trailing daily observations (and at least `N_liq = 20` for the liquidity screen, which is non-binding).\n- **Capacity / universe:** Intended for a liquid US common-equity cross-section; the dollar-volume screen is the only universe filter embedded in the signal. Cross-sectional standardisation requires at least 2 eligible symbols per date to be meaningful.\n- **Turnover:** With `N_smooth = 3` and a 5-day intended holding period, expected daily turnover is high relative to monthly-rebalanced factors; the alpha is a short-horizon signal and its economic viability is contingent on trading costs not addressed here.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_range_fast=5,\n                   N_range_slow=60,\n                   N_ret_vol=20,\n                   N_move=5,\n                   N_smooth=3,\n                   N_liq=20,\n                   eps=1e-12,\n                   winsor_z=4.0,\n                   min_obs_frac=1.0):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    prev_close = g['close'].shift(1)\n\n    tr = pd.concat([\n        (data['high'] - data['low']).abs(),\n        (data['high'] - prev_close).abs(),\n        (data['low'] - prev_close).abs()\n    ], axis=1).max(axis=1)\n\n    r = tr / prev_close.clip(lower=eps)\n\n    mp_fast = int(np.ceil(min_obs_frac * N_range_fast))\n    mp_slow = int(np.ceil(min_obs_frac * N_range_slow))\n    mp_vol = int(np.ceil(min_obs_frac * N_ret_vol))\n    mp_move = int(np.ceil(min_obs_frac * N_move))\n    mp_smooth = int(np.ceil(min_obs_frac * N_smooth))\n    mp_liq = int(np.ceil(min_obs_frac * N_liq))\n\n    r_fast = r.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_range_fast, min_periods=mp_fast).mean())\n    r_slow = r.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_range_slow, min_periods=mp_slow).mean())\n\n    K = np.log(r_fast.clip(lower=eps) / r_slow.clip(lower=eps))\n\n    K_mu = K.groupby(level='date').transform('mean')\n    K_sd = K.groupby(level='date').transform('std', ddof=0)\n    zK = ((K - K_mu) / K_sd.clip(lower=eps)).clip(lower=-winsor_z, upper=winsor_z)\n\n    sig_ret = data.groupby(level='symbol')['returns'].transform(\n        lambda s: s.rolling(N_ret_vol, min_periods=mp_vol).std(ddof=1))\n    cum_ret = data.groupby(level='symbol')['returns'].transform(\n        lambda s: s.rolling(N_move, min_periods=mp_move).sum())\n\n    M = cum_ret / (sig_ret * np.sqrt(N_move)).clip(lower=eps)\n\n    M_rank = M.groupby(level='date').rank(method='average')\n    M_cnt = M.groupby(level='date').transform('count')\n    uM = 2.0 * (M_rank - 1.0) / np.maximum(M_cnt - 1.0, 1.0) - 1.0\n\n    S_raw = uM * zK\n\n    S_sm = S_raw.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_smooth, min_periods=mp_smooth).mean())\n\n    dollar_vol = (data['close'] * data['volume']).groupby(level='symbol').transform(\n        lambda s: s.rolling(N_liq, min_periods=mp_liq).mean())\n\n    eligible = dollar_vol > 0\n    S_elig = S_sm.where(eligible)\n\n    S_rank = S_elig.groupby(level='date').rank(method='average')\n    S_cnt = S_elig.groupby(level='date').transform('count')\n    alpha = 2.0 * (S_rank - 1.0) / np.maximum(S_cnt - 1.0, 1.0) - 1.0\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "573e87dc2effd99729a3ae909234d397d11db5ab4e58fe523a25eaf674db2bb0",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_range_fast",
+            "N_range_slow",
+            "N_ret_vol",
+            "N_move",
+            "N_smooth",
+            "N_liq",
+            "eps",
+            "winsor_z",
+            "min_obs_frac"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1624,
+            "output_tokens": 5381,
+            "total_tokens": 7005
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

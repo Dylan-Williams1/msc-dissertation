@@ -1,0 +1,102 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_a3d1a1d6",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_min",
+            "N_market_min",
+            "N_cs_min"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-21T00:27:37.817132+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 22,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1627731769,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Cross-Sectional Low-Beta Alpha\n- **Holding Period:** 20 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - \\(N_{\\beta}=60\\): rolling beta estimation window\n  - \\(N_{\\min}=40\\): minimum valid symbol-market return pairs in the beta window\n  - \\(N_{\\text{market\\_min}}=50\\): minimum valid symbol returns required to calculate the daily market proxy\n  - \\(N_{\\text{cs\\_min}}=50\\): minimum valid beta estimates required to calculate the cross-sectional signal\n- **Required Inputs:** `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(r_{i,t}\\) denote its daily return. Define the available cross-section as\n\n\\[\n\\mathcal{A}_t=\\{i:r_{i,t}\\text{ is finite and observed}\\}.\n\\]\n\nThe equal-weighted market return proxy is\n\n\\[\nm_t=\n\\begin{cases}\n\\displaystyle \\frac{1}{|\\mathcal{A}_t|}\\sum_{i\\in\\mathcal{A}_t}r_{i,t},\n& |\\mathcal{A}_t|\\geq N_{\\text{market\\_min}},\\\\\n\\text{undefined}, & \\text{otherwise}.\n\\end{cases}\n\\]\n\nFor each symbol, define the trailing window\n\n\\[\n\\mathcal{W}_{i,t}\n=\n\\left\\{\nu:t-N_{\\beta}+1\\leq u\\leq t,\\;\nr_{i,u}\\text{ and }m_u\\text{ are defined}\n\\right\\},\n\\]\n\nwith valid-pair count\n\n\\[\nn_{i,t}=|\\mathcal{W}_{i,t}|.\n\\]\n\nWithin this window, calculate\n\n\\[\nS^{r}_{i,t}=\\sum_{u\\in\\mathcal{W}_{i,t}}r_{i,u},\n\\qquad\nS^{m}_{i,t}=\\sum_{u\\in\\mathcal{W}_{i,t}}m_u,\n\\]\n\n\\[\nS^{rm}_{i,t}=\\sum_{u\\in\\mathcal{W}_{i,t}}r_{i,u}m_u,\n\\qquad\nS^{mm}_{i,t}=\\sum_{u\\in\\mathcal{W}_{i,t}}m_u^2.\n\\]\n\nThe rolling covariance and market-variance numerators are\n\n\\[\nC_{i,t}\n=\nS^{rm}_{i,t}\n-\n\\frac{S^{r}_{i,t}S^{m}_{i,t}}{n_{i,t}},\n\\]\n\n\\[\nD_{i,t}\n=\nS^{mm}_{i,t}\n-\n\\frac{\\left(S^{m}_{i,t}\\right)^2}{n_{i,t}}.\n\\]\n\nThe beta estimate is\n\n\\[\n\\beta_{i,t}\n=\n\\begin{cases}\n\\displaystyle \\frac{C_{i,t}}{D_{i,t}},\n& n_{i,t}\\geq N_{\\min}\\text{ and }D_{i,t}>0,\\\\\n\\text{undefined}, & \\text{otherwise}.\n\\end{cases}\n\\]\n\nLet \\(\\mathcal{B}_t\\) be the set of symbols with defined beta estimates on day \\(t\\), and let \\(b_t=|\\mathcal{B}_t|\\). For each \\(i\\in\\mathcal{B}_t\\), define \\(R_{i,t}\\) as the average-tie cross-sectional rank of \\(-\\beta_{i,t}\\), and define its percentile rank as\n\n\\[\nP_{i,t}=\\frac{R_{i,t}}{b_t}.\n\\]\n\nThe final alpha is\n\n\\[\n\\alpha_{i,t}\n=\n\\begin{cases}\n\\displaystyle\nP_{i,t}\n-\n\\frac{1}{b_t}\\sum_{j\\in\\mathcal{B}_t}P_{j,t},\n& b_t\\geq N_{\\text{cs\\_min}},\\\\\n\\text{undefined}, & \\text{otherwise}.\n\\end{cases}\n\\]\n\nThus, lower-beta securities receive positive signals and higher-beta securities receive negative signals.\n\nNon-finite returns are treated as missing. Missing observations are omitted rather than imputed. Rolling calculations require at least \\(N_{\\min}\\) valid symbol-market pairs. A zero or negative market-variance numerator makes beta undefined. Cross-sectional ranks omit undefined beta estimates, and the signal is undefined unless at least \\(N_{\\text{cs\\_min}}\\) beta estimates are available.\n\n## Section 3: Causal Rationale\n\nRolling beta measures each stock\u2019s observable sensitivity to the equal-weighted return of the contemporaneous equity universe. Stocks with high estimated beta have recently delivered amplified participation in broad market movements, making beta an OHLCV-based proxy for systematic return amplification. Demand for this amplified upside exposure can raise the relative prices of high-beta stocks, while low-beta stocks provide less conspicuous market participation and may command higher subsequent risk-adjusted returns. Ranking beta cross-sectionally isolates this relative mechanism while centering the signal to maintain balanced long and short exposure.\n\n## Section 4: Structural Bounds\n\nThe alpha relies solely on Point-in-Time daily `returns` derived from the permitted PIT OHLCV dataset. The signal for day \\(t\\) uses only observations available through the market close on day \\(t\\), and execution occurs at the open of day \\(t+1\\). The formulation complies with this timing rule and does not use future observations or apply an execution lag within the signal itself.\n\nA symbol requires at least \\(N_{\\min}=40\\) valid symbol-market return pairs within its trailing \\(N_{\\beta}=60\\)-day window. The market proxy additionally requires at least \\(N_{\\text{market\\_min}}=50\\) valid returns on each included day, and the final cross-sectional signal requires at least \\(N_{\\text{cs\\_min}}=50\\) defined beta estimates.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_beta=60,\n    N_min=40,\n    N_market_min=50,\n    N_cs_min=50\n):\n    import numpy as np\n    import pandas as pd\n\n    work = df[[\"returns\"]].sort_index(level=[\"symbol\", \"date\"])\n    r = work[\"returns\"].where(np.isfinite(work[\"returns\"]))\n\n    market_count = r.groupby(level=\"date\").transform(\"count\")\n    market_return = (\n        r.groupby(level=\"date\")\n        .transform(\"mean\")\n        .where(market_count >= N_market_min)\n    )\n\n    valid_pair = r.notna() & market_return.notna()\n\n    moments = pd.DataFrame(\n        {\n            \"r\": r.where(valid_pair),\n            \"m\": market_return.where(valid_pair),\n            \"rm\": (r * market_return).where(valid_pair),\n            \"mm\": (market_return * market_return).where(valid_pair),\n            \"n\": valid_pair.astype(float),\n        },\n        index=work.index,\n    )\n\n    rolled = (\n        moments.groupby(level=\"symbol\")\n        .rolling(window=N_beta, min_periods=N_min)\n        .sum()\n    )\n    rolled.index = rolled.index.droplevel(0)\n\n    n = rolled[\"n\"]\n    covariance_numerator = rolled[\"rm\"] - (\n        rolled[\"r\"] * rolled[\"m\"] / n\n    )\n    variance_numerator = rolled[\"mm\"] - (\n        rolled[\"m\"] * rolled[\"m\"] / n\n    )\n\n    beta = covariance_numerator.div(\n        variance_numerator.where(variance_numerator > 0.0)\n    ).where(n >= N_min)\n\n    percentile_rank = (\n        (-beta)\n        .groupby(level=\"date\")\n        .rank(method=\"average\", pct=True)\n    )\n    cross_section_count = beta.groupby(level=\"date\").transform(\"count\")\n\n    alpha = (\n        percentile_rank\n        - percentile_rank.groupby(level=\"date\").transform(\"mean\")\n    ).where(cross_section_count >= N_cs_min)\n\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "4838f990aa408ac793357c1756d16a5a514884ba3ec802d9c7c0d82b3a7f995c",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_min",
+            "N_market_min",
+            "N_cs_min"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [
+            "float"
+        ],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4661,
+            "total_tokens": 5657
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

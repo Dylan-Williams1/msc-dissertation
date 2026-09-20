@@ -1,0 +1,82 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_8a8df75c",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 541482006,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_lookback",
+            "N_lag",
+            "N_vol",
+            "N_smooth",
+            "N_year",
+            "eps"
+        ],
+        "theme": "long_term_reversal",
+        "theme_title": "long-term reversal",
+        "timestamp_utc": "2026-08-24T18:34:33.075702+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 8,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7897b46d025c1a57d269c5acaac1ce9fa9e52fb1c4a5361f680638372ce114a9",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volatility_Adjusted_Long_Term_Reversal\n- Holding Period: 21 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_lookback = 252`\n  - `N_lag = 21`\n  - `N_vol = 252`\n  - `N_smooth = 5`\n  - `N_year = 252`\n  - `eps = 1e-6`\n- Required Inputs: `close`, `returns`\n\n# Section 2: Mathematical Formulation\nFor each asset $i$ on date $t$:\n\n1. Compute log price:\n$$p_{i,t} = \\ln(C_{i,t})$$\n\n2. Calculate long-term cumulative log return excluding the most recent month:\n$$R_{i,t} = p_{i,t - N\\_lag} - p_{i,t - N\\_lookback}$$\n\n3. Calculate the trailing daily return volatility over window $N\\_vol$:\n$$\\sigma_{i,t}^{daily} = \\sqrt{\\frac{1}{N\\_vol - 1} \\sum_{k=0}^{N\\_vol - 1} \\left( r_{i,t-k} - \\bar{r}_{i,t} \\right)^2}$$\nwhere $r_{i,t}$ is daily return and $\\bar{r}_{i,t} = \\frac{1}{N\\_vol} \\sum_{k=0}^{N\\_vol - 1} r_{i,t-k}$.\n\n4. Scale daily volatility to annual units:\n$$\\sigma_{i,t} = \\sigma_{i,t}^{daily} \\times \\sqrt{N\\_year}$$\n\n5. Compute risk-adjusted long-term return:\n$$V_{i,t} = \\frac{R_{i,t}}{\\sigma_{i,t} + eps}$$\n\n6. Standardize $V_{i,t}$ cross-sectionally across all $M_t$ assets available on date $t$:\n$$\\mu_t = \\frac{1}{M_t} \\sum_{j=1}^{M_t} V_{j,t}$$\n$$s_t = \\sqrt{\\frac{1}{M_t - 1} \\sum_{j=1}^{M_t} \\left( V_{j,t} - \\mu_t \\right)^2}$$\n$$Z_{i,t} = \\frac{V_{i,t} - \\mu_t}{s_t + eps}$$\n\n7. Invert cross-sectional Z-score to establish contrarian position:\n$$X_{i,t} = -Z_{i,t}$$\n\n8. Smooth the alpha signal over $N\\_smooth$ days to reduce turnover:\n$$\\alpha_{i,t} = \\frac{1}{N\\_smooth} \\sum_{k=0}^{N\\_smooth - 1} X_{i,t-k}$$\n\n**Handling of Undefined Values:**\n- Rolling calculations ($R_{i,t}$, $\\sigma_{i,t}^{daily}$, and $\\alpha_{i,t}$) require minimum trailing observations equal to their respective window sizes (`min_periods = N_lookback`, `min_periods = N_vol`, and `min_periods = N_smooth`). Observations prior to meeting these minimum window criteria yield `NaN`.\n- Division by zero is mitigated by adding constant $eps = 10^{-6}$ to denominators.\n- Missing values (`NaN`) are excluded from cross-sectional mean ($\\mu_t$) and standard deviation ($s_t$) calculations, and maintain a `NaN` value in the output Series.\n\n# Section 3: Causal Rationale\nLong-term equity asset returns measured over annual horizons exhibit cross-sectional mean reversion driven by market overreaction and institutional rebalancing. By evaluating price changes over an extended lookback window ($N\\_lookback = 252$) while lagging by one month ($N\\_lag = 21$), the signal isolates structural multi-month price momentum from short-term noise and immediate liquidity shocks. Standardizing log returns by trailing return volatility ($\\sigma_{i,t}$) ensures cross-sectional rankings reflect statistical extremity rather than underlying variance differentials across assets. Inverting the cross-sectional Z-score generates a systematic long position in risk-adjusted trailing underperformers and a short position in extended outperformers, capturing the structural premium associated with multi-month price mean-reversion.\n\n# Section 4: Structural Bounds\n- **Data Integrity**: The alpha strictly relies on Point-in-Time (PIT) daily OHLCV and return data.\n- **Execution Timing Rule**: Signals are evaluated at the close of trading day $t$ using data up to and including day $t$, with orders executed at the OPEN of trading day $t+1$. The formulation contains no forward-looking shifts or negative offsets and fully satisfies this rule.\n- **Minimum Data History**: A minimum history of $N\\_lookback = 252$ trailing daily observations per symbol is required before valid alpha values are produced.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(\n    df,\n    N_lookback=252,\n    N_lag=21,\n    N_vol=252,\n    N_smooth=5,\n    N_year=252,\n    eps=1e-6,\n):\n    log_p = np.log(df[\"close\"])\n\n    p_lag = log_p.groupby(level=\"symbol\").shift(N_lag)\n    p_lookback = log_p.groupby(level=\"symbol\").shift(N_lookback)\n    R = p_lag - p_lookback\n\n    vol_daily = df[\"returns\"].groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n    vol = vol_daily * np.sqrt(N_year)\n\n    V = R / (vol + eps)\n\n    mean_V = V.groupby(level=\"date\").transform(\"mean\")\n    std_V = V.groupby(level=\"date\").transform(\"std\")\n    Z = (V - mean_V) / (std_V + eps)\n\n    X = -Z\n\n    alpha = X.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    return alpha\n```",
+    "response_sha256": "4550f1afb08f62c855a403a8f14392f3b4a8ff4b0bd595aeec26f739209df655",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_lookback",
+            "N_lag",
+            "N_vol",
+            "N_smooth",
+            "N_year",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 541482006,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1460,
+            "total_tokens": 7771
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

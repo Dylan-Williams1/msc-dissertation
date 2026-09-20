@@ -1,0 +1,111 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_951423d0",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_vol",
+            "N_amihud",
+            "N_dvol",
+            "N_smooth",
+            "min_frac",
+            "liq_pct",
+            "eps",
+            "w_clip"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-20T23:34:59.594271+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 5,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 544188757,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Illiquidity-Weighted Intraday-Overnight Decomposed Short-Term Reversal (IWDR)\n- **Holding Period:** 5 trading days (signal recomputed daily; overlapping positions)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional demeaning of ranks)\n- **Parameters:**\n  - `N_rev = 5` \u2014 lookback window (days) for cumulative reversal return\n  - `N_vol = 20` \u2014 lookback window (days) for realised volatility normalisation\n  - `N_amihud = 20` \u2014 lookback window (days) for the Amihud-style illiquidity/price-impact measure\n  - `N_dvol = 20` \u2014 lookback window (days) for average dollar volume (used for the liquidity gate)\n  - `N_smooth = 3` \u2014 smoothing window (days) applied to the final cross-sectional score\n  - `min_frac = 0.8` \u2014 minimum fraction of observations required in any rolling window for it to be defined\n  - `liq_pct = 0.20` \u2014 cross-sectional dollar-volume percentile below which a name is excluded (signal set to missing)\n  - `eps = 1e-12` \u2014 numerical floor used to avoid division by zero\n  - `w_clip = 3.0` \u2014 symmetric clip applied to the illiquidity z-score before it is mapped to a weight\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (daily, point-in-time)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at day $t$ use information available at or before the close of day $t$.\n\n**Step 1 \u2014 Return decomposition.**\n\nClose-to-close total return is taken directly from the data: $r_{i,t}$ = `returns`.\n\nOvernight (close-to-open) and intraday (open-to-close) log components:\n\n$$\nr^{\\text{on}}_{i,t} = \\ln\\!\\left(\\frac{O_{i,t}}{C_{i,t-1}}\\right), \\qquad\nr^{\\text{id}}_{i,t} = \\ln\\!\\left(\\frac{C_{i,t}}{O_{i,t}}\\right)\n$$\n\nwhere $O$, $C$ are `open` and `close`. If $C_{i,t-1}\\le 0$ or $O_{i,t}\\le 0$ the corresponding component is missing.\n\n**Step 2 \u2014 Cumulative reversal components over `N_rev`.**\n\n$$\nR^{\\text{id}}_{i,t} = \\sum_{k=0}^{N_{\\text{rev}}-1} r^{\\text{id}}_{i,t-k}, \\qquad\nR^{\\text{on}}_{i,t} = \\sum_{k=0}^{N_{\\text{rev}}-1} r^{\\text{on}}_{i,t-k}\n$$\n\nEach rolling sum requires at least $\\lceil \\texttt{min\\_frac}\\cdot N_{\\text{rev}}\\rceil$ non-missing observations, else it is missing.\n\n**Step 3 \u2014 Volatility normalisation.**\n\n$$\n\\sigma_{i,t} = \\operatorname{sd}\\big(r_{i,t-N_{\\text{vol}}+1},\\dots,r_{i,t}\\big)\n$$\n\nrequiring at least $\\lceil \\texttt{min\\_frac}\\cdot N_{\\text{vol}}\\rceil$ observations. Scaled components:\n\n$$\n\\tilde{R}^{\\text{id}}_{i,t} = \\frac{R^{\\text{id}}_{i,t}}{\\sigma_{i,t}\\sqrt{N_{\\text{rev}}} + \\varepsilon}, \\qquad\n\\tilde{R}^{\\text{on}}_{i,t} = \\frac{R^{\\text{on}}_{i,t}}{\\sigma_{i,t}\\sqrt{N_{\\text{rev}}} + \\varepsilon}\n$$\n\nwith $\\varepsilon = $ `eps`.\n\n**Step 4 \u2014 Raw reversal core (intraday only, overnight neutralised).**\n\nThe reversal signal is taken on the intraday component only, with the overnight component removed via cross-sectional orthogonalisation. Define cross-sectional ranks at each date $t$ over the set $S_t$ of symbols with both quantities defined, mapped to $(-0.5, 0.5)$:\n\n$$\nu_{i,t} = \\frac{\\operatorname{rank}_{j\\in S_t}\\!\\left(\\tilde{R}^{\\text{id}}_{j,t}\\right)_i}{|S_t|+1} - \\tfrac{1}{2},\n\\qquad\nv_{i,t} = \\frac{\\operatorname{rank}_{j\\in S_t}\\!\\left(\\tilde{R}^{\\text{on}}_{j,t}\\right)_i}{|S_t|+1} - \\tfrac{1}{2}\n$$\n\n(ranks are ascending, ties averaged). Orthogonalise $u$ against $v$ cross-sectionally by OLS through the origin:\n\n$$\n\\beta_t = \\frac{\\sum_{i\\in S_t} u_{i,t} v_{i,t}}{\\sum_{i\\in S_t} v_{i,t}^2 + \\varepsilon}, \\qquad\ne_{i,t} = u_{i,t} - \\beta_t v_{i,t}\n$$\n\n**Step 5 \u2014 Illiquidity (price-impact) weight.**\n\nAmihud-style daily impact, with dollar volume $D_{i,t} = C_{i,t}\\cdot V_{i,t}$ (`volume` = $V$):\n\n$$\nA_{i,t} = \\frac{1}{N_{\\text{amihud}}}\\sum_{k=0}^{N_{\\text{amihud}}-1}\\frac{|r_{i,t-k}|}{D_{i,t-k}+\\varepsilon}\n$$\n\nrequiring at least $\\lceil \\texttt{min\\_frac}\\cdot N_{\\text{amihud}}\\rceil$ observations. Take logs and cross-sectionally z-score:\n\n$$\na_{i,t} = \\ln\\left(A_{i,t} + \\varepsilon\\right), \\qquad\nz_{i,t} = \\frac{a_{i,t} - \\operatorname{mean}_{j\\in S_t}(a_{j,t})}{\\operatorname{sd}_{j\\in S_t}(a_{j,t}) + \\varepsilon}\n$$\n\nClip and map to a strictly positive weight:\n\n$$\n\\hat z_{i,t} = \\min\\big(\\max(z_{i,t}, -w_{\\text{clip}}), w_{\\text{clip}}\\big), \\qquad\nw_{i,t} = \\exp\\!\\left(\\tfrac{1}{2}\\hat z_{i,t}\\right)\n$$\n\nIf $z_{i,t}$ is missing, $w_{i,t}$ is missing and the symbol is dropped at date $t$.\n\n**Step 6 \u2014 Liquidity gate.**\n\n$$\n\\bar D_{i,t} = \\frac{1}{N_{\\text{dvol}}}\\sum_{k=0}^{N_{\\text{dvol}}-1} D_{i,t-k}\n$$\n\n(min $\\lceil \\texttt{min\\_frac}\\cdot N_{\\text{dvol}}\\rceil$ observations). Let $q_t$ be the cross-sectional `liq_pct` quantile of $\\bar D_{\\cdot,t}$. Symbols with $\\bar D_{i,t} < q_t$ are set to missing at date $t$ and excluded.\n\n**Step 7 \u2014 Signal (reversal sign).**\n\n$$\ns_{i,t} = -\\,w_{i,t}\\, e_{i,t}\n$$\n\nThe negative sign implements reversal: high recent risk-adjusted intraday return $\\Rightarrow$ short.\n\n**Step 8 \u2014 Cross-sectional standardisation and smoothing.**\n\n$$\n\\hat s_{i,t} = \\frac{s_{i,t} - \\operatorname{mean}_{j\\in S_t}(s_{j,t})}{\\operatorname{sd}_{j\\in S_t}(s_{j,t}) + \\varepsilon}\n$$\n\n$$\n\\alpha_{i,t} = \\frac{1}{|K_{i,t}|}\\sum_{k\\in K_{i,t}} \\hat s_{i,t-k},\\quad K_{i,t}=\\{0,\\dots,N_{\\text{smooth}}-1\\}\n$$\n\nwith the trailing mean requiring at least $\\lceil \\texttt{min\\_frac}\\cdot N_{\\text{smooth}}\\rceil$ non-missing values, else missing. Finally re-standardise cross-sectionally:\n\n$$\n\\alpha^{\\ast}_{i,t} = \\frac{\\alpha_{i,t} - \\operatorname{mean}_{j}(\\alpha_{j,t})}{\\operatorname{sd}_{j}(\\alpha_{j,t}) + \\varepsilon}\n$$\n\n$\\alpha^{\\ast}_{i,t}$ is the output.\n\n**Handling of undefined values (explicit):** All rolling windows use the `min_frac` minimum-count rule stated above; windows failing it yield missing values. All divisions add $\\varepsilon$ to the denominator, so no division by zero occurs. Non-positive prices in Step 1 yield missing log returns. Missing values propagate and are excluded from cross-sectional ranks, means, standard deviations, quantiles and regressions; they are never imputed. Dates with fewer than 2 valid symbols yield missing cross-sectional statistics and hence a missing signal. Infinities arising from any operation are treated as missing. The only clipping is the `w_clip` clip in Step 5.\n\n# Section 3: Causal Rationale\n\nShort-horizon price moves in equities are partly compensation paid to liquidity providers who absorb transient order imbalances, and that compensation is mechanically reversed as inventory is unwound over the following days. The intraday (open-to-close) component of return is where continuous-auction liquidity provision occurs, whereas the overnight component largely reflects information accumulated while the market is closed and is more likely to be permanent; the alpha therefore reverses only the intraday component and orthogonalises it cross-sectionally against the overnight component so that names whose moves were news-driven are not systematically shorted. The Amihud-style ratio of absolute return to dollar volume is a direct OHLCV-observable proxy for price impact per unit of trade, so up-weighting high-impact names concentrates the position in stocks where a given price move is more likely to have been caused by temporary order pressure rather than by information. Dividing the cumulative move by trailing realised volatility puts fast and slow stocks on a comparable scale, so the ranking reflects an abnormal move rather than merely a volatile stock. The dollar-volume floor and the smoothing window exist because the reversal premium is only harvestable where round-trip trading is feasible and where day-to-day rank noise does not force excessive turnover.\n\n# Section 4: Structural Bounds\n\n- **Data:** The strategy uses exclusively point-in-time daily OHLCV data (`open`, `high`, `low`, `close`, `volume`) and the daily total `returns` series. No fundamental, analyst, index-membership, or corporate-action-forward data is used. Prices and returns must be as-reported/adjusted for splits and dividends using only information available at close of day $t$; no forward-filled restatements.\n- **Execution timing (fixed rule):** The signal $\\alpha^{\\ast}_{i,t}$ is computed using data available up to and including the market close on day $t$, and the resulting portfolio is executed at the **OPEN of day $t+1$**. Every term in Section 2 is a function of observations dated $t$ or earlier; no term uses $t+1$ data and no negative shifts appear. The formulation therefore complies with this rule. The Python function returns the signal aligned to date $t$; the one-day execution lag is applied by the backtesting harness, not inside the function.\n- **Minimum trailing observations:** The binding window is $\\max(N_{\\text{vol}}, N_{\\text{amihud}}, N_{\\text{dvol}})=20$ days of returns, which itself requires a prior close, plus the $N_{\\text{smooth}}=3$ day trailing mean of the daily cross-sectional score. Under the `min_frac = 0.8` rule the signal can first become defined at **19 trailing daily observations for the rolling inputs plus 3 further days of scores, i.e. a minimum of 22 trailing daily bars (23 including the base close needed for the first overnight return)**. In practice, require **at least 23 trailing daily observations** per symbol before treating the signal as valid.\n- **Cross-sectional bounds:** At least 2 valid symbols are required on a date for standardisation; a universe of at least ~50 names is required for the `liq_pct` quantile gate and the cross-sectional orthogonalisation to be meaningful. The alpha is dollar-neutral by construction and is undefined for single-name application.\n- **Capacity:** Positions are tilted toward high price-impact names; the `liq_pct` floor caps this tilt. Turnover is high (holding period ~5 days, daily rebalancing of an overlapping book), so the strategy is capacity-constrained and transaction-cost sensitive.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_rev=5,\n                   N_vol=20,\n                   N_amihud=20,\n                   N_dvol=20,\n                   N_smooth=3,\n                   min_frac=0.8,\n                   liq_pct=0.20,\n                   eps=1e-12,\n                   w_clip=3.0):\n\n    data = df.sort_index()\n\n    o = data['open'].astype(float)\n    c = data['close'].astype(float)\n    v = data['volume'].astype(float)\n    r = data['returns'].astype(float)\n\n    g = data.groupby(level='symbol')\n\n    c_prev = c.groupby(level='symbol').shift(1)\n\n    o_pos = o.where(o > 0)\n    c_pos = c.where(c > 0)\n    c_prev_pos = c_prev.where(c_prev > 0)\n\n    r_on = np.log(o_pos / c_prev_pos)\n    r_id = np.log(c_pos / o_pos)\n\n    mp_rev = int(np.ceil(min_frac * N_rev))\n    mp_vol = int(np.ceil(min_frac * N_vol))\n    mp_amh = int(np.ceil(min_frac * N_amihud))\n    mp_dvl = int(np.ceil(min_frac * N_dvol))\n    mp_smt = int(np.ceil(min_frac * N_smooth))\n\n    R_id = r_id.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum().droplevel(0)\n    R_on = r_on.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum().droplevel(0)\n    R_id = R_id.reindex(data.index)\n    R_on = R_on.reindex(data.index)\n\n    sigma = r.groupby(level='symbol').rolling(N_vol, min_periods=mp_vol).std().droplevel(0)\n    sigma = sigma.reindex(data.index)\n\n    scale = sigma * np.sqrt(N_rev) + eps\n    Rt_id = R_id / scale\n    Rt_on = R_on / scale\n\n    Rt_id = Rt_id.replace([np.inf, -np.inf], np.nan)\n    Rt_on = Rt_on.replace([np.inf, -np.inf], np.nan)\n\n    valid_uv = Rt_id.notna() & Rt_on.notna()\n    Rt_id = Rt_id.where(valid_uv)\n    Rt_on = Rt_on.where(valid_uv)\n\n    n_valid = Rt_id.groupby(level='date').transform('count')\n    u = Rt_id.groupby(level='date').rank(method='average', ascending=True) / (n_valid + 1.0) - 0.5\n    vv = Rt_on.groupby(level='date').rank(method='average', ascending=True) / (n_valid + 1.0) - 0.5\n\n    num = (u * vv).groupby(level='date').transform('sum')\n    den = (vv * vv).groupby(level='date').transform('sum') + eps\n    beta = num / den\n    e = u - beta * vv\n\n    D = c * v\n    impact = r.abs() / (D + eps)\n    impact = impact.replace([np.inf, -np.inf], np.nan)\n    A = impact.groupby(level='symbol').rolling(N_amihud, min_periods=mp_amh).mean().droplevel(0)\n    A = A.reindex(data.index)\n\n    a = np.log(A + eps)\n    a = a.replace([np.inf, -np.inf], np.nan)\n\n    a_mean = a.groupby(level='date').transform('mean')\n    a_std = a.groupby(level='date').transform('std')\n    z = (a - a_mean) / (a_std + eps)\n    z = z.replace([np.inf, -np.inf], np.nan)\n    z_hat = z.clip(lower=-w_clip, upper=w_clip)\n    w = np.exp(0.5 * z_hat)\n\n    Dbar = D.groupby(level='symbol').rolling(N_dvol, min_periods=mp_dvl).mean().droplevel(0)\n    Dbar = Dbar.reindex(data.index)\n    q = Dbar.groupby(level='date').transform(lambda x: x.quantile(liq_pct))\n    gate = Dbar >= q\n\n    s = -(w * e)\n    s = s.where(gate & Dbar.notna() & w.notna() & e.notna())\n    s = s.replace([np.inf, -np.inf], np.nan)\n\n    s_mean = s.groupby(level='date').transform('mean')\n    s_std = s.groupby(level='date').transform('std')\n    s_hat = (s - s_mean) / (s_std + eps)\n    s_hat = s_hat.replace([np.inf, -np.inf], np.nan)\n\n    alpha = s_hat.groupby(level='symbol').rolling(N_smooth, min_periods=mp_smt).mean().droplevel(0)\n    alpha = alpha.reindex(data.index)\n    alpha = alpha.replace([np.inf, -np.inf], np.nan)\n\n    a_m = alpha.groupby(level='date').transform('mean')\n    a_s = alpha.groupby(level='date').transform('std')\n    out = (alpha - a_m) / (a_s + eps)\n    out = out.replace([np.inf, -np.inf], np.nan)\n\n    out.name = 'alpha'\n    return out.reindex(df.index)\n```",
+    "response_sha256": "f19c3bd64134ec04d31b1f8aa93f1b33b07af80f72f836ab34070696996d11e9",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_vol",
+            "N_amihud",
+            "N_dvol",
+            "N_smooth",
+            "min_frac",
+            "liq_pct",
+            "eps",
+            "w_clip"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [
+            "float"
+        ],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1627,
+            "output_tokens": 6382,
+            "total_tokens": 8009
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

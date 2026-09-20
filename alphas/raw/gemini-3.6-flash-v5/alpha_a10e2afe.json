@@ -1,0 +1,82 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_a10e2afe",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 637367744,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_lag",
+            "N_vol",
+            "min_obs"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-24T18:25:32.239952+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 1,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volatility_Scaled_Intermediate_Momentum\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_mom = 126` (Lookback window in trading days for base momentum calculation)\n  - `N_lag = 5` (Lag in trading days to skip short-term mean-reversion)\n  - `N_vol = 60` (Rolling window in trading days for volatility estimation)\n  - `min_obs = 60` (Minimum required valid daily observations for rolling calculations)\n- Required Inputs: `close`, `returns`\n\n# Section 2: Mathematical Formulation\n1. **Intermediate Price Return ($PR_{i,t}$)**:\n   For asset $i$ at date $t$, calculate the intermediate price performance excluding the most recent $N_{lag}$ trading days:\n   $$PR_{i,t} = \\frac{C_{i, t - N_{lag}}}{C_{i, t - N_{mom}}} - 1$$\n   where $C_{i,t}$ is the daily close price of asset $i$ on date $t$.\n\n2. **Rolling Volatility ($\\sigma_{i,t}$)**:\n   Calculate the sample standard deviation of daily returns over a rolling window of $N_{vol}$ days:\n   $$\\sigma_{i,t} = \\sqrt{\\frac{1}{K_{i,t} - 1} \\sum_{k=0}^{N_{vol}-1} \\left( r_{i, t-k} - \\bar{r}_{i,t} \\right)^2}$$\n   where $r_{i,t}$ is the daily return (`returns`) of asset $i$ on date $t$, $\\bar{r}_{i,t} = \\frac{1}{K_{i,t}} \\sum_{k=0}^{N_{vol}-1} r_{i, t-k}$, and $K_{i,t}$ is the count of non-missing return observations in $[t - N_{vol} + 1, t]$. If $K_{i,t} < min\\_obs$, $\\sigma_{i,t}$ is undefined (NaN).\n\n3. **Risk-Adjusted Momentum ($RAM_{i,t}$)**:\n   Scale intermediate momentum by rolling volatility:\n   $$RAM_{i,t} = \\begin{cases} \\frac{PR_{i,t}}{\\sigma_{i,t}} & \\text{if } \\sigma_{i,t} > 0 \\text{ and } PR_{i,t}, \\sigma_{i,t} \\text{ are defined} \\\\ \\text{NaN} & \\text{otherwise} \\end{cases}$$\n   Any division resulting in positive or negative infinity is evaluated as undefined (NaN).\n\n4. **Cross-Sectional Z-Score Standardization ($Z_{i,t}$)**:\n   For each date $t$, let $S_t$ be the set of assets where $RAM_{i,t}$ is non-missing:\n   $$\\mu_t = \\frac{1}{|S_t|} \\sum_{i \\in S_t} RAM_{i,t}$$\n   $$\\sigma_t = \\sqrt{\\frac{1}{|S_t| - 1} \\sum_{i \\in S_t} \\left( RAM_{i,t} - \\mu_t \\right)^2}$$\n   $$Z_{i,t} = \\begin{cases} \\frac{RAM_{i,t} - \\mu_t}{\\sigma_t} & \\text{if } i \\in S_t \\text{ and } \\sigma_t > 0 \\\\ 0.0 & \\text{otherwise} \\end{cases}$$\n   If $RAM_{i,t}$ is missing, or if $\\sigma_t = 0$ or undefined, $Z_{i,t}$ is set to $0.0$.\n\n# Section 3: Causal Rationale\nEquities exhibit price momentum due to systematic market underreaction to persistent fundamental news and gradual information diffusion across market participants. Standard price return momentum can be noisy, frequently overweighting high-volatility, speculative stocks that experience transient price spikes. By scaling intermediate performance (excluding the immediate 5-day reversal window) by daily return volatility, the signal isolates trend persistence per unit of risk, favoring stable trends over uncompensated volatility. The cross-sectional Z-score transformation enforces market-neutral relative ranking across the asset universe at each trading date.\n\n# Section 4: Structural Bounds\n- **Point-in-Time Data**: The signal relies strictly on Point-in-Time (PIT) daily OHLCV market data available at market close.\n- **Execution Timing**: The alpha value calculated at the market close of day $t$ is used to execute trade orders at the OPEN of day $t+1$. The signal output is aligned to date $t$ without applying future shifts inside the signal generation code.\n- **Minimum Observation Threshold**: A minimum of $N_{mom} = 126$ contiguous trailing trading days of data is required per asset before the signal generates a non-zero value.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_mom=126, N_lag=5, N_vol=60, min_obs=60):\n    close = df[\"close\"]\n    returns = df[\"returns\"]\n\n    close_lag = close.groupby(level=\"symbol\").shift(N_lag)\n    close_mom = close.groupby(level=\"symbol\").shift(N_mom)\n    pr = (close_lag / close_mom) - 1.0\n\n    vol = returns.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vol, min_periods=min_obs).std()\n    )\n\n    ram = pr / vol\n    ram = ram.replace([np.inf, -np.inf], np.nan)\n\n    cs_mean = ram.groupby(level=\"date\").transform(\"mean\")\n    cs_std = ram.groupby(level=\"date\").transform(\"std\")\n\n    z_score = (ram - cs_mean) / cs_std\n    z_score = z_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)\n\n    return z_score\n```",
+    "response_sha256": "26bd24365be5359c4e70b27d215eda09fd4798a5ca31fe6e416285e3315e049c",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_lag",
+            "N_vol",
+            "min_obs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "fillna",
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 637367744,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1422,
+            "total_tokens": 7258
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

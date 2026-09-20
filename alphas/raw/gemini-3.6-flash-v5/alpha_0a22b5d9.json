@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_0a22b5d9",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1609573728,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "min_obs_beta",
+            "N_eps",
+            "min_obs_eps",
+            "lambda_beta"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-25T08:41:07.279577+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 10,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Low_Beta_Residual_Momentum\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_beta = 60` (Lookback window for market beta estimation in trading days)\n  - `min_obs_beta = 40` (Minimum required non-missing observations for market beta estimation)\n  - `N_eps = 20` (Lookback window for residual return Sharpe ratio estimation in trading days)\n  - `min_obs_eps = 15` (Minimum required non-missing observations for residual return estimation)\n  - `lambda_beta = 0.5` (Cross-sectional weighting coefficient for low-beta tilt relative to residual momentum)\n- Required Inputs: `returns`\n\n# Section 2: Mathematical Formulation\nThe alpha signal is constructed via the following sequence of transformations:\n\n1. **Cross-Sectional Market Return Calculation:**\n   For each date $t$, the equal-weighted universe market return $R_{m, t}$ is calculated as the cross-sectional mean across all available assets $N_t$:\n   $$R_{m, t} = \\frac{1}{N_t} \\sum_{i=1}^{N_t} R_{i, t}$$\n\n2. **Rolling Asset Market Beta Calculation:**\n   Over a rolling window of length $N_{\\text{beta}}$ up to day $t$, sample covariance between asset returns $R_{i}$ and market returns $R_{m}$, and sample variance of $R_{m}$, are defined as:\n   $$\\text{Cov}_{i, m, t} = \\frac{1}{M_{i,t} - 1} \\sum_{k=0}^{M_{i,t} - 1} \\left(R_{i, t-k} - \\bar{R}_{i, t}\\right) \\left(R_{m, t-k} - \\bar{R}_{m, t}\\right)$$\n   $$\\text{Var}_{m, t} = \\frac{1}{M_{i,t} - 1} \\sum_{k=0}^{M_{i,t} - 1} \\left(R_{m, t-k} - \\bar{R}_{m, t}\\right)^2$$\n   where $\\bar{R}_{i, t}$ and $\\bar{R}_{m, t}$ are the sample means over the valid observations $M_{i,t}$ in $[t - N_{\\text{beta}} + 1, t]$. The asset beta $\\beta_{i, t}$ is:\n   $$\\beta_{i, t} = \\begin{cases} \\frac{\\text{Cov}_{i, m, t}}{\\text{Var}_{m, t}} & \\text{if } \\text{Var}_{m, t} > 10^{-12} \\text{ and } M_{i,t} \\ge \\text{min\\_obs\\_beta} \\\\ \\text{NaN} & \\text{otherwise} \\end{cases}$$\n\n3. **Residual Daily Return Estimation:**\n   $$\\epsilon_{i, t} = R_{i, t} - \\beta_{i, t} \\cdot R_{m, t}$$\n\n4. **Rolling Residual Sharpe Ratio:**\n   Over a rolling window of length $N_{\\text{eps}}$, the sample mean $\\mu_{\\epsilon, i, t}$ and sample standard deviation $\\sigma_{\\epsilon, i, t}$ of residual returns are computed over valid count $K_{i,t}$:\n   $$\\mu_{\\epsilon, i, t} = \\frac{1}{K_{i,t}} \\sum_{k=0}^{K_{i,t} - 1} \\epsilon_{i, t-k}$$\n   $$\\sigma_{\\epsilon, i, t} = \\sqrt{\\frac{1}{K_{i,t} - 1} \\sum_{k=0}^{K_{i,t} - 1} \\left(\\epsilon_{i, t-k} - \\mu_{\\epsilon, i, t}\\right)^2}$$\n   $$S_{\\epsilon, i, t} = \\begin{cases} \\frac{\\mu_{\\epsilon, i, t}}{\\sigma_{\\epsilon, i, t}} & \\text{if } \\sigma_{\\epsilon, i, t} > 10^{-12} \\text{ and } K_{i,t} \\ge \\text{min\\_obs\\_eps} \\\\ \\text{NaN} & \\text{otherwise} \\end{cases}$$\n\n5. **Cross-Sectional Standardisation (Z-Scoring):**\n   For any variable $X_{i,t} \\in \\{S_{\\epsilon, i, t}, \\beta_{i, t}\\}$ on date $t$:\n   $$Z(X_{i,t}) = \\begin{cases} \\frac{X_{i,t} - \\mu_{X, t}}{\\sigma_{X, t}} & \\text{if } X_{i,t} \\text{ is not NaN}, \\, \\sigma_{X, t} > 10^{-12}, \\text{ and } N_{\\text{valid}, t} \\ge 2 \\\\ 0.0 & \\text{if } X_{i,t} \\text{ is not NaN and } (\\sigma_{X, t} \\le 10^{-12} \\text{ or } N_{\\text{valid}, t} < 2) \\\\ \\text{NaN} & \\text{if } X_{i,t} \\text{ is NaN} \\end{cases}$$\n   where $\\mu_{X, t}$ and $\\sigma_{X, t}$ are the cross-sectional mean and sample standard deviation of $X$ across valid observations $N_{\\text{valid}, t}$ on date $t$.\n\n6. **Composite Alpha Signal:**\n   $$\\alpha_{i, t} = Z(S_{\\epsilon, i, t}) - \\lambda_{\\beta} \\cdot Z(\\beta_{i, t})$$\n\n**Handling of Undefined Values:**\n- Any division where the denominator absolute value is $\\le 10^{-12}$ is defined as invalid and evaluates to NaN (or $0.0$ for cross-sectional z-score).\n- Minimum rolling observation thresholds ($M_{i,t} \\ge \\text{min\\_obs\\_beta}$ and $K_{i,t} \\ge \\text{min\\_obs\\_eps}$) are strictly required; windows with insufficient valid data evaluate to NaN.\n- Missing daily return inputs output NaN without forward-filling.\n\n# Section 3: Causal Rationale\nLeverage-constrained institutional and benchmark-restricted market participants systematically overweight high-beta equities to enhance nominal returns, creating the well-known low-beta premium where lower-beta assets earn superior risk-adjusted performance. Concurrently, standard return momentum is frequently distorted by broad market beta exposures, obscuring genuine asset-specific price discovery. By decomposing daily returns into market exposure and residual components using a rolling beta model, the signal isolates idiosyncratic momentum standardized by idiosyncratic risk ($S_{\\epsilon, i, t}$). Combining a long tilt toward positive residual Sharpe ratio assets with a negative tilt toward market beta ($-\\lambda_{\\beta} Z(\\beta_{i,t})$) captures non-systematic price continuation while exploiting the structural leverage-constraint mispricing of beta.\n\n# Section 4: Structural Bounds\n- **Data Integrity:** The alpha relies strictly on Point-in-Time (PIT) daily OHLCV and return data without future data leakage or look-ahead bias.\n- **Execution Rule:** The signal $\\alpha_{i,t}$ is generated at the market close of day $t$ using data up to and including day $t$, and portfolio positions are executed at the OPEN of day $t+1$.\n- **Minimum History Required:** A minimum trailing history of $N_{\\text{beta}} = 60$ trading days is required before the signal is defined for a given symbol.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(\n    df,\n    N_beta=60,\n    min_obs_beta=40,\n    N_eps=20,\n    min_obs_eps=15,\n    lambda_beta=0.5,\n):\n  r = df[\"returns\"]\n\n  # Cross-sectional market return calculation\n  r_m = r.groupby(level=\"date\").transform(\"mean\")\n\n  # Rolling components for market beta estimation\n  mean_r = r.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_beta, min_periods=min_obs_beta).mean()\n  )\n  mean_rm = r_m.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_beta, min_periods=min_obs_beta).mean()\n  )\n  mean_rim = (r * r_m).groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_beta, min_periods=min_obs_beta).mean()\n  )\n  count_beta = r.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_beta, min_periods=min_obs_beta).count()\n  )\n\n  cov_i_m = (mean_rim - mean_r * mean_rm) * (count_beta / (count_beta - 1.0))\n\n  var_m = r_m.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_beta, min_periods=min_obs_beta).var()\n  )\n\n  var_m_safe = var_m.where(var_m > 1e-12, np.nan)\n  beta = cov_i_m / var_m_safe\n\n  # Idiosyncratic residual return calculation\n  eps = r - beta * r_m\n\n  # Rolling residual Sharpe ratio calculation\n  eps_mean = eps.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_eps, min_periods=min_obs_eps).mean()\n  )\n  eps_std = eps.groupby(level=\"symbol\").transform(\n      lambda x: x.rolling(N_eps, min_periods=min_obs_eps).std()\n  )\n\n  eps_std_safe = eps_std.where(eps_std > 1e-12, np.nan)\n  s_eps = eps_mean / eps_std_safe\n\n  # Cross-sectional Z-scoring step\n  s_eps_mean = s_eps.groupby(level=\"date\").transform(\"mean\")\n  s_eps_std = s_eps.groupby(level=\"date\").transform(\"std\")\n  s_eps_count = s_eps.groupby(level=\"date\").transform(\"count\")\n\n  z_s_eps = (s_eps - s_eps_mean) / s_eps_std\n  z_s_eps = z_s_eps.where((s_eps_std > 1e-12) & (s_eps_count >= 2), 0.0)\n  z_s_eps = z_s_eps.where(s_eps.notna(), np.nan)\n\n  beta_mean = beta.groupby(level=\"date\").transform(\"mean\")\n  beta_std = beta.groupby(level=\"date\").transform(\"std\")\n  beta_count = beta.groupby(level=\"date\").transform(\"count\")\n\n  z_beta = (beta - beta_mean) / beta_std\n  z_beta = z_beta.where((beta_std > 1e-12) & (beta_count >= 2), 0.0)\n  z_beta = z_beta.where(beta.notna(), np.nan)\n\n  alpha = z_s_eps - lambda_beta * z_beta\n\n  return alpha\n```",
+    "response_sha256": "d6cd0c812447d490309e555b2266b597ffcabc9e9a20c08b07d7e2109107f41c",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "min_obs_beta",
+            "N_eps",
+            "min_obs_eps",
+            "lambda_beta"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1609573728,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 2658,
+            "total_tokens": 13633
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

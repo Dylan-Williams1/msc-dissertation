@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_a25f1309",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_rev",
+            "N_vol",
+            "N_part",
+            "N_smooth",
+            "MinObs",
+            "w_prox",
+            "w_part",
+            "w_rev",
+            "eps"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-20T23:49:30.715761+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 20,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1056511211,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed 52-Week High Proximity with Short-Horizon Overextension Filter (NH-Proximity Alpha)\n- **Holding Period:** 20 trading days (monthly rebalance cadence; signal recomputed daily, positions expected to turn over on a ~20-day scale)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral (rank-demeaned)\n- **Parameters:**\n  - `N_high = 252` \u2014 lookback window (trading days) defining the 52-week high/low range\n  - `N_rev = 5` \u2014 short-horizon window for the overextension (reversal) filter\n  - `N_vol = 60` \u2014 window for average dollar-volume baseline used in the participation confirmation term\n  - `N_part = 20` \u2014 window over which recent participation is measured\n  - `N_smooth = 5` \u2014 smoothing window applied to the composite raw score\n  - `MinObs = 252` \u2014 minimum trailing observations required before the signal is defined\n  - `w_prox = 1.0` \u2014 weight on the 52-week high proximity component\n  - `w_part = 0.3` \u2014 weight on the participation-confirmation component\n  - `w_rev = 0.4` \u2014 weight on the short-horizon overextension component (subtracted)\n  - `eps = 1e-12` \u2014 numerical floor to avoid division by zero\n- **Required Inputs:** `high`, `low`, `close`, `volume` (daily OHLCV). `open`, `returns` not used.\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All rolling windows are computed on symbol $i$'s own time series and are strictly backward-looking, inclusive of day $t$.\n\n**Step 1 \u2014 52-week range extremes.**\n\n$$H_{i,t} = \\max_{k=0,\\dots,N_{high}-1} \\text{high}_{i,t-k}, \\qquad L_{i,t} = \\min_{k=0,\\dots,N_{high}-1} \\text{low}_{i,t-k}$$\n\nBoth require at least `MinObs` non-missing observations in the window; otherwise undefined (NaN).\n\n**Step 2 \u2014 Proximity to the 52-week high (Stochastic-style position in range).**\n\n$$P_{i,t} = \\frac{\\text{close}_{i,t} - L_{i,t}}{\\max\\left(H_{i,t} - L_{i,t},\\ \\varepsilon\\right)}, \\qquad \\varepsilon = \\texttt{eps}$$\n\nThe denominator is floored at `eps`, so a degenerate range ($H=L$) yields a large-magnitude but finite value; in practice $P_{i,t}\\in[0,1]$ whenever $H_{i,t}>L_{i,t}$.\n\n**Step 3 \u2014 Participation confirmation.** Define dollar volume $D_{i,t} = \\text{close}_{i,t}\\cdot \\text{volume}_{i,t}$.\n\n$$V_{i,t} = \\frac{\\frac{1}{N_{part}}\\sum_{k=0}^{N_{part}-1} D_{i,t-k}}{\\max\\left(\\frac{1}{N_{vol}}\\sum_{k=0}^{N_{vol}-1} D_{i,t-k},\\ \\varepsilon\\right)}, \\qquad U_{i,t} = \\log\\left(\\max(V_{i,t},\\varepsilon)\\right)$$\n\nThe numerator window requires at least `N_part` observations, the denominator at least `N_vol`.\n\n**Step 4 \u2014 Short-horizon overextension.**\n\n$$R_{i,t} = \\frac{\\text{close}_{i,t}}{\\text{close}_{i,t-N_{rev}}} - 1$$\n\nUndefined (NaN) if $\\text{close}_{i,t-N_{rev}}$ is missing or zero.\n\n**Step 5 \u2014 Cross-sectional standardisation.** For any panel quantity $X_{i,t}$, define the cross-sectional rank-normal-free scaling\n\n$$z_t(X)_i = \\frac{\\operatorname{rank}_t(X_{i,t}) - \\frac{1}{2}\\left(n_t+1\\right)}{\\max\\left(\\frac{1}{2}\\left(n_t-1\\right),\\ \\varepsilon\\right)}$$\n\nwhere $\\operatorname{rank}_t$ is the ascending average rank of $X_{i,t}$ among the $n_t$ symbols with a defined value of $X$ on day $t$. This maps to approximately $[-1, 1]$ with zero cross-sectional mean. Symbols with $X_{i,t}$ undefined receive an undefined $z$.\n\n**Step 6 \u2014 Composite raw score.**\n\n$$S_{i,t} = w_{prox}\\, z_t(P)_i + w_{part}\\, z_t(U)_i - w_{rev}\\, z_t(R)_i$$\n\n$S_{i,t}$ is defined only when all three component $z$-scores are defined.\n\n**Step 7 \u2014 Temporal smoothing.**\n\n$$\\tilde{S}_{i,t} = \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} S_{i,t-k}$$\n\nrequiring all `N_smooth` values present; otherwise undefined.\n\n**Step 8 \u2014 Final signal (cross-sectional re-standardisation, dollar-neutral by construction).**\n\n$$\\alpha_{i,t} = z_t(\\tilde{S})_i$$\n\n**Missing-value handling (explicit):** No imputation is performed at any stage. Rolling statistics require the full `min_periods` counts stated above; where unmet the value is NaN and propagates to $\\alpha_{i,t}$ as NaN, meaning no position. Division by zero is prevented solely by the `eps` floors stated in Steps 2, 3 and 5. No clipping or winsorisation is applied beyond the bounded nature of cross-sectional ranks.\n\n# Section 3: Causal Rationale\n\nA stock's closing price relative to its trailing 252-day high\u2013low range is an anchoring reference that is directly visible in daily price data, and prices near the top of that range face a well-documented behavioural friction: the prior extreme acts as a psychological reference point that slows the incorporation of good news, so information diffuses gradually rather than instantaneously. Because the proximity measure is scale-free and normalised by each stock's own range, it isolates *where* a stock sits within its own recent history rather than its raw volatility or price level, making it comparable across the cross-section. The participation term \u2014 recent 20-day dollar volume relative to a 60-day baseline \u2014 is an OHLCV-observable proxy for the breadth of trading activity accompanying the approach to the high; expansion in traded value alongside a high-range close is more consistent with genuine information arrival than a drift on thin turnover, which is more easily reversed. The 5-day return term is subtracted because a close near the 52-week high reached via a very sharp multi-day move is likely to contain transient liquidity-demand pressure that mechanically reverses, so penalising short-horizon overextension separates persistent range position from momentary spikes. Smoothing the composite over 5 days reduces sensitivity to single-day range or volume artefacts (e.g., one-off gaps) without materially delaying the slower diffusion effect the signal targets.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses exclusively point-in-time daily OHLCV fields (`high`, `low`, `close`, `volume`). No fundamentals, no analyst data, no index membership, no corporate-action-forward information. All prices are assumed to be split- and dividend-adjusted using adjustment factors known as of day $t$ (a PIT-adjusted price panel); no restatement of history after $t$ is used.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is constructed using data available up to and including the market close on day $t$, and the resulting target position is executed at the **OPEN of day $t+1$**. Every term in Section 2 references only observations at indices $\\le t$; no negative shifts, forward fills from the future, or same-bar-open-to-close information beyond day $t$'s close are used. The formulation therefore complies with the rule. The backtesting harness applies the one-day execution lag; the function returns the signal aligned to date $t$.\n- **Minimum trailing observations:** A symbol requires at least $N_{high} + N_{smooth} - 1 = 256$ trailing daily observations before $\\alpha_{i,t}$ is defined (252 for the 52-week range, plus 4 additional days so that the 5-day smoothing window is fully populated). The 60-day dollar-volume baseline and the 5-day return are subsumed by this requirement. Symbols below this threshold produce NaN and are excluded from the book.\n- **Universe/liquidity constraints:** The signal is intended for a liquid, cross-sectionally broad US equity universe (e.g., top-decile dollar-volume common stocks). It is not defined for symbols with zero traded volume over an entire `N_vol` window (the `eps` floor prevents a numerical error but the resulting value is not economically meaningful and should be screened by the universe filter, not by the alpha).\n- **Neutrality:** The output is cross-sectionally rank-demeaned each day, hence approximately dollar-neutral. It is **not** beta-, sector-, or size-neutral; any such neutralisation is the responsibility of downstream portfolio construction.\n- **Capacity/turnover:** Expected holding period ~20 days; daily recomputation with 5-day smoothing implies moderate turnover. Not suitable for sub-daily execution.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_high=252,\n                   N_rev=5,\n                   N_vol=60,\n                   N_part=20,\n                   N_smooth=5,\n                   MinObs=252,\n                   w_prox=1.0,\n                   w_part=0.3,\n                   w_rev=0.4,\n                   eps=1e-12):\n\n    data = df.sort_index()\n\n    g = data.groupby(level='symbol')\n\n    # Step 1: 52-week range extremes\n    H = g['high'].rolling(window=N_high, min_periods=MinObs).max().reset_index(level=0, drop=True)\n    L = g['low'].rolling(window=N_high, min_periods=MinObs).min().reset_index(level=0, drop=True)\n\n    # Step 2: proximity within 52-week range\n    rng = (H - L).clip(lower=eps)\n    P = (data['close'] - L) / rng\n\n    # Step 3: participation confirmation\n    dollar_vol = data['close'] * data['volume']\n    dv = dollar_vol.groupby(level='symbol')\n    part_short = dv.rolling(window=N_part, min_periods=N_part).mean().reset_index(level=0, drop=True)\n    part_long = dv.rolling(window=N_vol, min_periods=N_vol).mean().reset_index(level=0, drop=True)\n    V = part_short / part_long.clip(lower=eps)\n    U = np.log(V.clip(lower=eps))\n\n    # Step 4: short-horizon overextension\n    close_lag = g['close'].shift(N_rev)\n    close_lag = close_lag.where(close_lag != 0.0, np.nan)\n    R = data['close'] / close_lag - 1.0\n\n    # Step 5: cross-sectional rank standardisation\n    def _xs(s):\n        r = s.groupby(level='date').rank(method='average', ascending=True)\n        n = s.groupby(level='date').transform('count')\n        centre = 0.5 * (n + 1.0)\n        scale = (0.5 * (n - 1.0)).clip(lower=eps)\n        return (r - centre) / scale\n\n    zP = _xs(P)\n    zU = _xs(U)\n    zR = _xs(R)\n\n    # Step 6: composite raw score\n    S = w_prox * zP + w_part * zU - w_rev * zR\n\n    # Step 7: temporal smoothing\n    S_smooth = S.groupby(level='symbol').rolling(window=N_smooth, min_periods=N_smooth).mean() \\\n                .reset_index(level=0, drop=True)\n\n    # Step 8: final cross-sectional standardisation\n    alpha = _xs(S_smooth)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "80a5aeac6f0abd3523bfccdf1aa1d62b39ca27b7e1f70b04ba4f3776ad42d9ea",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_rev",
+            "N_vol",
+            "N_part",
+            "N_smooth",
+            "MinObs",
+            "w_prox",
+            "w_part",
+            "w_rev",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1631,
+            "output_tokens": 4225,
+            "total_tokens": 5856
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

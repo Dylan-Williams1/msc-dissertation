@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_4502b5af",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1243873348,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_vol",
+            "N_vshort",
+            "N_vlong",
+            "N_smooth"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-24T18:24:18.980347+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 0,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volume-Confirmed Volatility-Adjusted Momentum (VCVAM)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_mom = 20` (Log price momentum lookback in days)\n  - `N_vol = 20` (Daily return volatility lookback in days)\n  - `N_vshort = 5` (Short-term volume moving average lookback in days)\n  - `N_vlong = 60` (Long-term baseline volume moving average lookback in days)\n  - `N_smooth = 3` (Signal smoothing window in days)\n- Required Inputs: `close`, `volume`, `returns`\n\n---\n\n# Section 2: Mathematical Formulation\n\nLet $P_{i,t}$ denote the `close` price, $r_{i,t}$ denote the daily `returns`, and $V_{i,t}$ denote the `volume` for symbol $i$ on date $t$.\n\n1. **Log Price Momentum:**\n   $$M_{i,t} = \\ln(P_{i,t}) - \\ln(P_{i,t-N_{mom}})$$\n\n2. **Rolling Return Volatility:**\n   $$\\sigma_{i,t} = \\sqrt{ \\frac{1}{N_{vol}-1} \\sum_{k=0}^{N_{vol}-1} \\left( r_{i,t-k} - \\bar{r}_{i,t} \\right)^2 }, \\quad \\text{where } \\bar{r}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} r_{i,t-k}$$\n\n3. **Volatility-Adjusted Momentum:**\n   $$VM_{i,t} = \\begin{cases} \\frac{M_{i,t}}{\\sigma_{i,t}} & \\text{if } \\sigma_{i,t} > 0 \\text{ and } \\sigma_{i,t}, M_{i,t} \\neq \\text{NaN} \\\\ 0.0 & \\text{if } \\sigma_{i,t} = 0 \\\\ \\text{NaN} & \\text{otherwise} \\end{cases}$$\n\n4. **Volume Confirmation Ratio:**\n   $$\\bar{V}_{i,t}^{short} = \\frac{1}{N_{vshort}} \\sum_{k=0}^{N_{vshort}-1} V_{i,t-k}, \\quad \\bar{V}_{i,t}^{long} = \\frac{1}{N_{vlong}} \\sum_{k=0}^{N_{vlong}-1} V_{i,t-k}$$\n   $$VR_{i,t} = \\begin{cases} \\frac{\\bar{V}_{i,t}^{short}}{\\bar{V}_{i,t}^{long}} & \\text{if } \\bar{V}_{i,t}^{long} > 0 \\text{ and } \\bar{V}_{i,t}^{short}, \\bar{V}_{i,t}^{long} \\neq \\text{NaN} \\\\ 1.0 & \\text{if } \\bar{V}_{i,t}^{long} = 0 \\\\ \\text{NaN} & \\text{otherwise} \\end{cases}$$\n\n5. **Raw Combined Signal:**\n   $$S_{i,t}^{raw} = VM_{i,t} \\cdot VR_{i,t}$$\n\n6. **Smoothed Time-Series Signal:**\n   $$S_{i,t}^{smooth} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} S_{i,t-k}^{raw}$$\n\n7. **Cross-Sectional Z-Score Normalization:**\n   Let $I_t$ be the subset of assets with defined (non-NaN) values of $S_{i,t}^{smooth}$ on date $t$, with count $K_t = |I_t|$.\n   $$\\mu_t = \\frac{1}{K_t} \\sum_{i \\in I_t} S_{i,t}^{smooth}, \\quad \\sigma_t^{CS} = \\sqrt{ \\frac{1}{K_t - 1} \\sum_{i \\in I_t} \\left( S_{i,t}^{smooth} - \\mu_t \\right)^2 }$$\n   $$\\alpha_{i,t} = \\begin{cases} \\frac{S_{i,t}^{smooth} - \\mu_t}{\\sigma_t^{CS}} & \\text{if } i \\in I_t, \\, K_t > 1, \\text{ and } \\sigma_t^{CS} > 0 \\\\ 0.0 & \\text{otherwise} \\end{cases}$$\n\n**Handling of Undefined Values and Missing Data:**\n- Time-series rolling operations require full observation windows (`min_periods` equal to window size).\n- If trailing observations are fewer than required window sizes, intermediate values evaluate to `NaN`.\n- Zero standard deviation in volatility scaling yields $0.0$; zero baseline volume yields a ratio of $1.0$.\n- Any final `NaN` values resulting from initialization burn-in or missing inputs are imputed to $0.0$ post cross-sectional transformation.\n\n---\n\n# Section 3: Causal Rationale\nMedium-term price momentum reflects market trend continuation caused by initial investor underreaction to persistent firm information. Scaling nominal return momentum by trailing daily return volatility ensures that the momentum measurement is risk-adjusted, preventing high-beta or speculative price spikes from overwhelming the signal. Multiplying by the volume confirmation ratio\u2014the ratio of short-term average trading volume to long-term baseline volume\u2014amplifies momentum signals accompanied by expanding trading volume, which serves as an observable proxy for broader market participation and elevated trading consensus. Applying cross-sectional Z-score normalization converts the resulting smoothed values into a market-neutral relative ranking across symbols on each trading day.\n\n---\n\n# Section 4: Structural Bounds\n- **Data Integrity:** The alpha relies strictly on Point-in-Time (PIT) daily OHLCV and return data without look-ahead bias.\n- **Execution Timing:** The signal $\\alpha_{i,t}$ is generated using data available up to market close on day $t$, and portfolio rebalancing occurs at the market OPEN on day $t+1$. The formulation strictly complies with this execution schedule and emits signals aligned to date $t$.\n- **Minimum Observation Requirement:** The signal requires a trailing history of $\\max(N_{vlong}, N_{vol}, N_{mom}) + N_{smooth} - 1 = \\max(60, 20, 20) + 3 - 1 = 62$ trading days before producing defined non-zero outputs.\n\n---\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(\n    df: pd.DataFrame,\n    N_mom: int = 20,\n    N_vol: int = 20,\n    N_vshort: int = 5,\n    N_vlong: int = 60,\n    N_smooth: int = 3,\n) -> pd.Series:\n    log_close = np.log(df[\"close\"])\n    log_close_lag = log_close.groupby(level=\"symbol\").shift(N_mom)\n    m_mom = log_close - log_close_lag\n\n    ret_vol = df[\"returns\"].groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n\n    vm_val = np.where(\n        ret_vol > 0,\n        m_mom / ret_vol,\n        np.where(ret_vol == 0, 0.0, np.nan),\n    )\n    vm = pd.Series(vm_val, index=df.index)\n\n    v_short = df[\"volume\"].groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vshort, min_periods=N_vshort).mean()\n    )\n    v_long = df[\"volume\"].groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vlong, min_periods=N_vlong).mean()\n    )\n\n    vr_val = np.where(\n        v_long > 0,\n        v_short / v_long,\n        np.where(v_long == 0, 1.0, np.nan),\n    )\n    vr = pd.Series(vr_val, index=df.index)\n\n    s_raw = vm * vr\n\n    s_smooth = s_raw.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    cs_mean = s_smooth.groupby(level=\"date\").transform(\"mean\")\n    cs_std = s_smooth.groupby(level=\"date\").transform(\"std\")\n\n    alpha_val = np.where(\n        (cs_std > 0) & s_smooth.notna(),\n        (s_smooth - cs_mean) / cs_std,\n        0.0,\n    )\n\n    return pd.Series(alpha_val, index=df.index)\n```",
+    "response_sha256": "4f9437b5a2b001641de219f44c31bd7a1eaa11a5dde5f51fc8d94b88384b94d4",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_vol",
+            "N_vshort",
+            "N_vlong",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1243873348,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 2114,
+            "total_tokens": 9163
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

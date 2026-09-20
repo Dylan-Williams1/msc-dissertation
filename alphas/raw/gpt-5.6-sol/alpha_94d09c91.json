@@ -1,0 +1,96 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_94d09c91",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_smooth"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-21T00:23:49.627633+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 19,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1632517261,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Smoothed 52-Week High Proximity Rank\n- **Holding Period:** 20 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_high = 252`: trailing window used to define the 52-week high\n  - `N_smooth = 5`: trailing smoothing window for high proximity\n- **Required Inputs:** `high`, `close`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), define the trailing 52-week high, including day \\(t\\), as\n\n\\[\nH_{i,t}=\\max_{u=t-N_{\\text{high}}+1,\\ldots,t}\\left(\\text{high}_{i,u}\\right).\n\\]\n\nThe close-to-high proximity ratio is\n\n\\[\nP_{i,t}=\\frac{\\text{close}_{i,t}}{H_{i,t}}.\n\\]\n\nSmooth the proximity ratio over the most recent \\(N_{\\text{smooth}}\\) observations:\n\n\\[\n\\bar P_{i,t}\n=\n\\frac{1}{N_{\\text{smooth}}}\n\\sum_{u=t-N_{\\text{smooth}}+1}^{t}P_{i,u}.\n\\]\n\nFor the set \\(\\mathcal U_t\\) of symbols with valid \\(\\bar P_{i,t}\\), compute the ascending cross-sectional percentile rank using average ranks for ties:\n\n\\[\nR_{i,t}\n=\n\\frac{\n\\operatorname{rank}^{\\mathrm{avg}}_{\\mathcal U_t}\\left(\\bar P_{i,t}\\right)\n}{\n|\\mathcal U_t|\n}.\n\\]\n\nThe final market-neutral alpha signal is the demeaned percentile rank:\n\n\\[\n\\alpha_{i,t}\n=\nR_{i,t}\n-\n\\frac{1}{|\\mathcal U_t|}\n\\sum_{j\\in\\mathcal U_t}R_{j,t}.\n\\]\n\nA larger value indicates that a symbol is closer to its trailing 52-week high relative to other valid symbols.\n\nThe rolling high requires exactly `N_high` non-missing `high` observations. The smoothed proximity requires exactly `N_smooth` non-missing proximity observations. If \\(H_{i,t}=0\\), \\(P_{i,t}\\) is undefined and represented as missing. Missing observations are not imputed, and infinite values are not otherwise generated or replaced. Cross-sectional ranks exclude missing signals; if only one symbol is valid on a date, its demeaned signal is zero.\n\n## Section 3: Causal Rationale\n\nThe trailing 52-week high is an observable reference level derived directly from daily highs, and proximity to it identifies stocks whose prices have sustained comparatively strong trends. Market participants may adjust gradually to persistent price information because the prior high acts as a salient reference point, allowing relative strength near that level to continue over an intermediate horizon. Averaging proximity over several days reduces sensitivity to a single intraday spike or isolated close. Cross-sectional ranking converts this mechanism into a long/short signal that favors stocks persistently nearest their annual highs and disfavors those furthest below them.\n\n## Section 4: Structural Bounds\n\nThe strategy relies solely on Point-in-Time daily `high` and `close` data contained within the permitted PIT OHLCV dataset. The signal for day \\(t\\) uses only observations available up to and including the market close on day \\(t\\), and execution occurs at the open of day \\(t+1\\). The formulation complies with this timing rule because all rolling windows are trailing and no future observations are used.\n\nThe minimum number of trailing daily rows required before the signal can be defined for a symbol is\n\n\\[\nN_{\\text{high}}+N_{\\text{smooth}}-1=256,\n\\]\n\nsubject additionally to the required observations being non-missing.\n\n## Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\ndef generate_alpha(df, N_high=252, N_smooth=5):\n    original_index = df.index\n    df = df.sort_index(level=[\"symbol\", \"date\"])\n\n    rolling_high = (\n        df[\"high\"]\n        .groupby(level=\"symbol\")\n        .rolling(window=N_high, min_periods=N_high)\n        .max()\n        .droplevel(0)\n    )\n\n    valid_high = rolling_high.where(rolling_high != 0)\n    proximity = df[\"close\"] / valid_high\n\n    smoothed_proximity = (\n        proximity\n        .groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n    )\n\n    cross_sectional_rank = smoothed_proximity.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True,\n        na_option=\"keep\",\n    )\n\n    alpha = cross_sectional_rank - cross_sectional_rank.groupby(\n        level=\"date\"\n    ).transform(\"mean\")\n\n    return alpha.reindex(original_index)\n```",
+    "response_sha256": "aade2fcb4c823f91ddb00647858bc42cbf2a7e670c33b982eac4c0bd5f30b51c",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 1003,
+            "output_tokens": 2595,
+            "total_tokens": 3598
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

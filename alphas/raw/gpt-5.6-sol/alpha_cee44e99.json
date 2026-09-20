@@ -1,0 +1,106 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_cee44e99",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_range",
+            "sigma_floor",
+            "Z_cap",
+            "E_cap",
+            "theta_expand"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-21T00:12:46.053031+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 9,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1385205569,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Volatility-Expansion Reversal\n- **Holding Period:** 1 trading day\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_vol = 20`: lookback for lagged realized volatility\n  - `N_range = 20`: lookback for the lagged average normalized intraday range\n  - `sigma_floor = 1e-8`: minimum valid realized volatility\n  - `Z_cap = 5.0`: absolute cap on the volatility-standardized return\n  - `E_cap = 3.0`: upper cap on the range-expansion ratio\n  - `theta_expand = 1.0`: minimum range-expansion ratio required to activate the signal\n- **Required Inputs:** `high`, `low`, `close`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(H_{i,t}\\), \\(L_{i,t}\\), and \\(C_{i,t}\\) denote the daily high, low, and close. Let \\(r_{i,t}\\) denote the supplied daily return.\n\nFirst define the normalized intraday range:\n\n\\[\n\\rho_{i,t}=\\frac{H_{i,t}-L_{i,t}}{C_{i,t}}.\n\\]\n\nThe range is defined only when \\(H_{i,t}\\), \\(L_{i,t}\\), and \\(C_{i,t}\\) are finite, \\(C_{i,t}>0\\), and \\(H_{i,t}\\geq L_{i,t}\\).\n\nUsing only observations available before day \\(t\\), define lagged realized volatility as the root mean square return:\n\n\\[\n\\sigma_{i,t}^{\\mathrm{lag}}\n=\n\\sqrt{\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=1}^{N_{\\mathrm{vol}}} r_{i,t-k}^{2}\n}.\n\\]\n\nDefine the lagged average normalized range:\n\n\\[\n\\bar{\\rho}_{i,t}^{\\mathrm{lag}}\n=\n\\frac{1}{N_{\\mathrm{range}}}\n\\sum_{k=1}^{N_{\\mathrm{range}}}\\rho_{i,t-k}.\n\\]\n\nThe volatility-standardized current return is:\n\n\\[\nZ_{i,t}\n=\n\\operatorname{clip}\n\\left(\n\\frac{r_{i,t}}{\\sigma_{i,t}^{\\mathrm{lag}}},\n-Z_{\\mathrm{cap}},\nZ_{\\mathrm{cap}}\n\\right),\n\\]\n\nwhere \\(Z_{i,t}\\) is undefined when\n\n\\[\n\\sigma_{i,t}^{\\mathrm{lag}}\\leq \\sigma_{\\mathrm{floor}}.\n\\]\n\nThe capped range-expansion ratio is:\n\n\\[\nE_{i,t}\n=\n\\min\n\\left(\n\\frac{\\rho_{i,t}}{\\bar{\\rho}_{i,t}^{\\mathrm{lag}}},\nE_{\\mathrm{cap}}\n\\right),\n\\]\n\nwhere \\(E_{i,t}\\) is undefined when\n\n\\[\n\\bar{\\rho}_{i,t}^{\\mathrm{lag}}\\leq 0.\n\\]\n\nThe final alpha is:\n\n\\[\n\\alpha_{i,t}\n=\n-Z_{i,t}\n\\max\\left(E_{i,t}-\\theta_{\\mathrm{expand}},0\\right).\n\\]\n\nThus, a negative volatility-standardized return during an abnormal range expansion produces a positive signal, while a positive standardized return produces a negative signal.\n\nEach rolling calculation requires all observations in its corresponding window: `N_vol` finite prior returns and `N_range` finite prior normalized ranges. Missing or non-finite inputs are treated as undefined rather than imputed. If any required current or rolling quantity is undefined, the final alpha is also undefined. Division by zero is prevented through the explicit positivity conditions on lagged volatility and lagged average range.\n\n## Section 3: Causal Rationale\n\nA large absolute daily return relative to trailing realized volatility identifies an unusually abrupt price move. An intraday high-low range above its own trailing average provides an OHLC-based proxy that the move coincided with a volatility expansion rather than ordinary daily variation. Such abrupt expansions can temporarily move the closing price beyond the level supported by the symbol\u2019s recent variation, creating a short-horizon reversal mechanism. The signal therefore takes the opposite side of the standardized return, with exposure increasing only when the observable normalized range confirms abnormal volatility.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time daily `high`, `low`, `close`, and `returns` data; it does not use revised fundamentals, future data, or non-OHLCV information.\n\nThe signal for day \\(t\\) is generated after the market close using data available up to and including the close of day \\(t\\). Execution occurs at the open of day \\(t+1\\). The formulation complies with this rule because all rolling benchmarks use observations through \\(t-1\\), while only the contemporaneously available range and return from day \\(t\\) enter the current shock calculation.\n\nThe minimum number of trailing symbol observations, including the current row, is:\n\n\\[\n1+\\max\\left(N_{\\mathrm{vol}},N_{\\mathrm{range}}\\right).\n\\]\n\nWith the default parameters, at least \\(21\\) symbol observations are required, and all required fields within the relevant rolling windows must be valid.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_vol=20,\n    N_range=20,\n    sigma_floor=1e-8,\n    Z_cap=5.0,\n    E_cap=3.0,\n    theta_expand=1.0,\n):\n    import numpy as np\n    import pandas as pd\n\n    work = df.sort_index()\n\n    ret = work[\"returns\"].where(np.isfinite(work[\"returns\"]))\n\n    valid_range = (\n        np.isfinite(work[\"high\"])\n        & np.isfinite(work[\"low\"])\n        & np.isfinite(work[\"close\"])\n        & work[\"close\"].gt(0)\n        & work[\"high\"].ge(work[\"low\"])\n    )\n\n    normalized_range = (\n        (work[\"high\"] - work[\"low\"]) / work[\"close\"]\n    ).where(valid_range)\n\n    lagged_squared_return = (\n        ret.groupby(level=\"symbol\", sort=False).shift(1).pow(2)\n    )\n\n    lagged_variance = (\n        lagged_squared_return.groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .reset_index(level=0, drop=True)\n        .reindex(work.index)\n    )\n\n    lagged_volatility = np.sqrt(lagged_variance)\n\n    lagged_range = normalized_range.groupby(\n        level=\"symbol\", sort=False\n    ).shift(1)\n\n    lagged_average_range = (\n        lagged_range.groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_range, min_periods=N_range)\n        .mean()\n        .reset_index(level=0, drop=True)\n        .reindex(work.index)\n    )\n\n    standardized_return = (\n        ret / lagged_volatility.where(lagged_volatility.gt(sigma_floor))\n    ).clip(lower=-Z_cap, upper=Z_cap)\n\n    range_expansion = (\n        normalized_range\n        / lagged_average_range.where(lagged_average_range.gt(0))\n    ).clip(upper=E_cap)\n\n    alpha = -standardized_return * (\n        range_expansion - theta_expand\n    ).clip(lower=0)\n\n    alpha.name = \"alpha\"\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "234eeadab770b2068554e602f9d3c35a78898b498e5316e7ba5cb240c869aa4e",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_range",
+            "sigma_floor",
+            "Z_cap",
+            "E_cap",
+            "theta_expand"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4655,
+            "total_tokens": 5651
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

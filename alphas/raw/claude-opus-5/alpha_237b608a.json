@@ -1,0 +1,103 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_237b608a",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_resid",
+            "N_smooth",
+            "N_dollarvol",
+            "MIN_BETA_OBS",
+            "EPS",
+            "WINSOR_Z"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-20T23:52:43.782944+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 23,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2139514762,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Beta-Conditioned Downside-Divergence Reversal (Idiosyncratic Beta Residual Alpha)\n- **Holding Period:** 5 trading days (signal recomputed daily; positions overlap)\n- **Orientation:** Long/Short, dollar-neutral cross-sectional\n- **Parameters:**\n  - `N_beta = 60` \u2014 rolling window (days) for estimating each symbol's beta to the equal-weighted cross-sectional market return\n  - `N_resid = 5` \u2014 window (days) over which cumulative beta-adjusted (residual) return is accumulated\n  - `N_smooth = 3` \u2014 smoothing window (days) applied to the final cross-sectional score\n  - `N_dollarvol = 20` \u2014 window (days) for average dollar volume used in the liquidity-based universe weighting\n  - `MIN_BETA_OBS = 40` \u2014 minimum non-missing observations required inside the `N_beta` window\n  - `EPS = 1e-12` \u2014 floor added to variance/volatility denominators to avoid division by zero\n  - `WINSOR_Z = 3.0` \u2014 absolute cap applied to the cross-sectional z-score\n- **Required Inputs:** `close`, `volume`, `returns` (all daily, PIT). No other inputs used.\n\n# Section 2: Mathematical Formulation\n\n**Notation.** Let $i$ index symbols and $t$ index trading days. $r_{i,t}$ is the daily total return (`returns`), $C_{i,t}$ the close, $V_{i,t}$ the volume.\n\n**Step 1 \u2014 Market proxy.** The market return is the cross-sectional equal-weighted mean of available returns on each day:\n\n$$\nm_t \\;=\\; \\frac{1}{|\\mathcal{S}_t|}\\sum_{j \\in \\mathcal{S}_t} r_{j,t},\n\\qquad \\mathcal{S}_t = \\{\\, j : r_{j,t} \\text{ observed on day } t \\,\\}\n$$\n\n**Step 2 \u2014 Rolling beta.** Over the trailing window of length `N_beta` ending at and including day $t$:\n\n$$\n\\beta_{i,t} \\;=\\; \\frac{\\operatorname{Cov}_{t-\\text{N\\_beta}+1:t}\\!\\left(r_{i},\\, m\\right)}{\\operatorname{Var}_{t-\\text{N\\_beta}+1:t}\\!\\left(m\\right) + \\text{EPS}}\n$$\n\nBoth moments use the sample (denominator $n-1$) estimator. $\\beta_{i,t}$ is defined only if at least `MIN_BETA_OBS` paired non-missing observations exist in the window; otherwise $\\beta_{i,t}$ is missing and the symbol receives no signal on day $t$.\n\n**Step 3 \u2014 Residual (beta-adjusted) daily return.**\n\n$$\ne_{i,t} \\;=\\; r_{i,t} \\;-\\; \\beta_{i,t}\\, m_t\n$$\n\n**Step 4 \u2014 Cumulative short-horizon residual displacement.**\n\n$$\nE_{i,t} \\;=\\; \\sum_{k=0}^{\\text{N\\_resid}-1} e_{i,\\,t-k}\n$$\n\nrequiring all `N_resid` values to be present; otherwise $E_{i,t}$ is missing.\n\n**Step 5 \u2014 Scaling by idiosyncratic volatility.** The residual dispersion over the beta window:\n\n$$\n\\sigma^{e}_{i,t} \\;=\\; \\operatorname{Std}_{t-\\text{N\\_beta}+1:t}\\!\\left(e_{i}\\right)\n\\quad (\\text{sample std, min } \\text{MIN\\_BETA\\_OBS} \\text{ obs})\n$$\n\n$$\nD_{i,t} \\;=\\; \\frac{E_{i,t}}{\\sqrt{\\text{N\\_resid}}\\;\\bigl(\\sigma^{e}_{i,t} + \\text{EPS}\\bigr)}\n$$\n\n$D_{i,t}$ is a standardised measure of how far the stock has moved relative to what its beta exposure to the market alone would imply.\n\n**Step 6 \u2014 Raw signal (reversal orientation).**\n\n$$\ns_{i,t} \\;=\\; -\\,D_{i,t}\n$$\n\n**Step 7 \u2014 Liquidity weight.** Let\n\n$$\nA_{i,t} \\;=\\; \\frac{1}{\\text{N\\_dollarvol}}\\sum_{k=0}^{\\text{N\\_dollarvol}-1} C_{i,t-k}\\,V_{i,t-k},\n\\qquad\nw_{i,t} \\;=\\; \\operatorname{rank}_{\\,j \\in \\mathcal{U}_t}\\!\\bigl(A_{j,t}\\bigr) \\big/ |\\mathcal{U}_t|\n$$\n\nwhere $\\operatorname{rank}$ is the ascending cross-sectional rank (average method) among the set $\\mathcal{U}_t$ of symbols with both $s_{i,t}$ and $A_{i,t}$ defined, so $w_{i,t}\\in(0,1]$. $A_{i,t}$ requires all `N_dollarvol` observations present.\n\n**Step 8 \u2014 Weighted, winsorised cross-sectional z-score.** Let $x_{i,t} = w_{i,t}\\, s_{i,t}$. Across $i \\in \\mathcal{U}_t$:\n\n$$\nz_{i,t} \\;=\\; \\operatorname{clip}\\!\\left(\\frac{x_{i,t} - \\mu_t}{\\sigma_t + \\text{EPS}},\\; -\\text{WINSOR\\_Z},\\; +\\text{WINSOR\\_Z}\\right),\n\\quad\n\\mu_t = \\operatorname{mean}_i(x_{i,t}),\\;\\; \\sigma_t = \\operatorname{std}_i(x_{i,t})\n$$\n\n**Step 9 \u2014 Temporal smoothing.**\n\n$$\n\\tilde z_{i,t} \\;=\\; \\frac{1}{\\text{N\\_smooth}}\\sum_{k=0}^{\\text{N\\_smooth}-1} z_{i,\\,t-k}\n$$\n\nrequiring all `N_smooth` values present.\n\n**Step 10 \u2014 Final dollar-neutral alpha.** Re-centre and normalise cross-sectionally on day $t$ over $\\mathcal{V}_t = \\{i : \\tilde z_{i,t} \\text{ defined}\\}$:\n\n$$\n\\alpha_{i,t} \\;=\\; \\frac{\\tilde z_{i,t} - \\operatorname{mean}_{j\\in\\mathcal{V}_t}(\\tilde z_{j,t})}{\\sum_{j\\in\\mathcal{V}_t}\\bigl|\\tilde z_{j,t} - \\operatorname{mean}(\\tilde z)\\bigr| + \\text{EPS}}\n$$\n\nso that $\\sum_i \\alpha_{i,t} = 0$ and $\\sum_i |\\alpha_{i,t}| \\approx 1$.\n\n**Undefined-value handling (explicit).** (i) Rolling windows use the minimum-observation counts stated above (`MIN_BETA_OBS` for beta and residual volatility; full window for $E$, $A$, $\\tilde z$); where unmet, the value is missing and the symbol is excluded from that day's cross-section. (ii) All variance/std denominators have `EPS` added; no other division-by-zero treatment. (iii) Missing observations propagate to missing signal values and are simply dropped from cross-sectional moments and ranks; they are never imputed with zero or any other value.\n\n# Section 3: Causal Rationale\n\nDaily returns of a stock decompose into a market-driven component, whose magnitude is measured by the rolling beta of the stock's return on the equal-weighted cross-sectional mean return, and a residual component orthogonal to it. Because high-beta stocks mechanically move more on market days, raw short-horizon return rankings are dominated by market exposure rather than stock-specific information; subtracting $\\beta_{i,t} m_t$ removes that exposure so that the ranking reflects idiosyncratic displacement only. Short-horizon idiosyncratic displacement is disproportionately produced by transient liquidity demand \u2014 a stock must be pushed away from the price at which risk-bearing intermediaries are indifferent in order to absorb a one-sided flow \u2014 and the compensation paid for that liquidity is recovered as the price reverts over the following days, motivating the negative sign in Step 6. Scaling by trailing idiosyncratic volatility puts stocks with different residual risk on a common footing, so the signal measures the number of typical idiosyncratic standard deviations moved rather than raw percentage move, which prevents the cross-section from being dominated by structurally volatile names. Weighting by the rank of trailing average dollar volume tilts exposure toward names where a beta-neutral residual can be estimated from continuously traded prices and where a reversal can plausibly be realised, rather than toward thinly traded names whose residuals are largely stale-price artefacts.\n\n# Section 4: Structural Bounds\n\n- **Data:** Uses exclusively Point-in-Time daily OHLCV data (`close`, `volume`, `returns`). No fundamentals, no analyst data, no index membership, no survivorship-adjusted external universe list, no restatement-prone inputs. The market proxy is constructed endogenously from the same PIT cross-section.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is computed from information available up to and including the market close on day $t$, and the resulting position is executed at the **OPEN of day $t+1$**. Every term in Section 2 \u2014 $r_{i,t}$, $m_t$, $\\beta_{i,t}$, $E_{i,t}$, $\\sigma^e_{i,t}$, $A_{i,t}$, $\\tilde z_{i,t}$ \u2014 uses only observations dated $\\le t$. No forward-looking or negative-shift operation appears in the construction. The backtest harness applies the one-day execution lag; the returned Series is dated at $t$.\n- **Minimum trailing observations:** A symbol requires at least $\\text{MIN\\_BETA\\_OBS} + N_{\\text{resid}} - 1 + N_{\\text{smooth}} - 1 = 40 + 4 + 2 = 46$ trailing daily observations for the final smoothed signal to be defined, and the liquidity weight additionally requires $N_{\\text{dollarvol}} = 20$ observations; the binding requirement is therefore **46 trailing daily observations**. In practice the beta window itself spans `N_beta = 60` days, so signals typically first appear once a symbol has at least 46 observations within a 60-day trailing span.\n- **Other bounds:** Signal is cross-sectionally demeaned and $L^1$-normalised, hence dollar-neutral by construction with gross exposure of one unit before any leverage scaling. It carries residual beta-neutrality only in expectation (via the beta adjustment in the return decomposition), not exact ex-ante portfolio beta neutrality. Requires a cross-section of at least a few dozen symbols per date for the equal-weighted market proxy and cross-sectional moments to be meaningful. Turnover is high (short residual horizon); the strategy is only viable in liquid names, which the dollar-volume rank weighting partially enforces.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_beta=60,\n                   N_resid=5,\n                   N_smooth=3,\n                   N_dollarvol=20,\n                   MIN_BETA_OBS=40,\n                   EPS=1e-12,\n                   WINSOR_Z=3.0):\n\n    data = df.sort_index()\n\n    r = data['returns']\n    close = data['close']\n    volume = data['volume']\n\n    # Step 1: equal-weighted cross-sectional market return\n    mkt_by_date = r.groupby(level='date').mean()\n    m = pd.Series(mkt_by_date.reindex(r.index.get_level_values('date')).values,\n                  index=r.index)\n\n    # Step 2: rolling beta of stock return on market return\n    g_r = r.groupby(level='symbol')\n    g_m = m.groupby(level='symbol')\n\n    cov_rm = g_r.rolling(window=N_beta, min_periods=MIN_BETA_OBS).cov(m)\n    if isinstance(cov_rm.index, pd.MultiIndex) and cov_rm.index.nlevels > 2:\n        cov_rm = cov_rm.droplevel(0)\n    cov_rm = cov_rm.reindex(r.index)\n\n    var_m = g_m.rolling(window=N_beta, min_periods=MIN_BETA_OBS).var()\n    if isinstance(var_m.index, pd.MultiIndex) and var_m.index.nlevels > 2:\n        var_m = var_m.droplevel(0)\n    var_m = var_m.reindex(r.index)\n\n    beta = cov_rm / (var_m + EPS)\n\n    # Step 3: residual daily return\n    e = r - beta * m\n\n    # Step 4: cumulative short-horizon residual displacement\n    E = e.groupby(level='symbol').rolling(window=N_resid, min_periods=N_resid).sum()\n    if isinstance(E.index, pd.MultiIndex) and E.index.nlevels > 2:\n        E = E.droplevel(0)\n    E = E.reindex(r.index)\n\n    # Step 5: idiosyncratic volatility scaling\n    sig_e = e.groupby(level='symbol').rolling(window=N_beta, min_periods=MIN_BETA_OBS).std()\n    if isinstance(sig_e.index, pd.MultiIndex) and sig_e.index.nlevels > 2:\n        sig_e = sig_e.droplevel(0)\n    sig_e = sig_e.reindex(r.index)\n\n    D = E / (np.sqrt(N_resid) * (sig_e + EPS))\n\n    # Step 6: reversal orientation\n    s = -D\n\n    # Step 7: liquidity weight from trailing average dollar volume\n    dv = close * volume\n    A = dv.groupby(level='symbol').rolling(window=N_dollarvol, min_periods=N_dollarvol).mean()\n    if isinstance(A.index, pd.MultiIndex) and A.index.nlevels > 2:\n        A = A.droplevel(0)\n    A = A.reindex(r.index)\n\n    valid = s.notna() & A.notna()\n    A_valid = A.where(valid)\n    w = A_valid.groupby(level='date').rank(method='average', ascending=True)\n    n_valid = A_valid.groupby(level='date').transform('count')\n    w = w / n_valid\n\n    # Step 8: weighted, winsorised cross-sectional z-score\n    x = (w * s).where(valid)\n    mu = x.groupby(level='date').transform('mean')\n    sd = x.groupby(level='date').transform('std')\n    z = ((x - mu) / (sd + EPS)).clip(lower=-WINSOR_Z, upper=WINSOR_Z)\n\n    # Step 9: temporal smoothing\n    zt = z.groupby(level='symbol').rolling(window=N_smooth, min_periods=N_smooth).mean()\n    if isinstance(zt.index, pd.MultiIndex) and zt.index.nlevels > 2:\n        zt = zt.droplevel(0)\n    zt = zt.reindex(r.index)\n\n    # Step 10: dollar-neutral, L1-normalised alpha\n    zt_mu = zt.groupby(level='date').transform('mean')\n    zc = zt - zt_mu\n    l1 = zc.abs().groupby(level='date').transform('sum')\n    alpha = zc / (l1 + EPS)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "937264807c7b79351018ef4e390e517635cc60afcda7f3f9e01cf50263e14ff1",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_resid",
+            "N_smooth",
+            "N_dollarvol",
+            "MIN_BETA_OBS",
+            "EPS",
+            "WINSOR_Z"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1623,
+            "output_tokens": 5420,
+            "total_tokens": 7043
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

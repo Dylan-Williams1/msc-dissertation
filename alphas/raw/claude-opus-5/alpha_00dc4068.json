@@ -1,0 +1,113 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_00dc4068",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_beta_min",
+            "N_short",
+            "N_short_min",
+            "w_shrink",
+            "w_beta",
+            "w_drift",
+            "Z_clip",
+            "N_smooth",
+            "N_smooth_min",
+            "eps_var",
+            "min_names"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-20T23:50:43.632812+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 21,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1178233595,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Shrunk-Beta Betting-Against-Beta with Beta-Drift Overlay (BAB-Drift)\n- **Holding Period:** 10 trading days (signal recomputed daily; positions rebalanced daily toward the target)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional z-scores)\n- **Parameters:**\n  - `N_beta = 60` \u2014 long-window length (days) for the primary rolling beta\n  - `N_beta_min = 40` \u2014 minimum valid observations required in the long beta window\n  - `N_short = 20` \u2014 short-window length (days) for the fast beta used in the drift term\n  - `N_short_min = 15` \u2014 minimum valid observations required in the short beta window\n  - `w_shrink = 0.60` \u2014 shrinkage weight of the raw long beta toward the market beta of 1\n  - `w_beta = 0.70` \u2014 weight on the shrunk-beta level component\n  - `w_drift = 0.30` \u2014 weight on the beta-drift component\n  - `Z_clip = 3.0` \u2014 symmetric winsorisation bound applied to cross-sectional z-scores\n  - `N_smooth = 3` \u2014 length of the trailing simple-moving-average smoothing of the final score\n  - `N_smooth_min = 1` \u2014 minimum observations for the smoothing window\n  - `eps_var = 1e-12` \u2014 floor below which the market-return variance is treated as degenerate (signal undefined)\n  - `min_names = 20` \u2014 minimum number of valid cross-sectional observations on a date for that date's z-scores to be defined\n- **Required Inputs:** `returns` (daily simple returns). No other columns are used. All inputs are from the permitted OHLCV+returns set.\n\n# Section 2: Mathematical Formulation\n\n**Notation.** Let $i$ index symbols and $t$ index trading dates. $r_{i,t}$ is the daily return of symbol $i$ on day $t$. Let $S_t$ be the set of symbols with a non-missing $r_{i,t}$ on date $t$, and $n_t = |S_t|$.\n\n**Step 1 \u2014 Market proxy.** The market return is the equal-weighted cross-sectional mean of available returns:\n\n$$r_{m,t} \\;=\\; \\frac{1}{n_t}\\sum_{j \\in S_t} r_{j,t}$$\n\nIf $n_t = 0$, $r_{m,t}$ is missing.\n\n**Step 2 \u2014 Rolling second moments (per symbol).** For a window length $N$ with minimum count $m$, define the trailing means over the last $N$ observations of symbol $i$ up to and including day $t$ (observations with either $r_{i,s}$ or $r_{m,s}$ missing are excluded from the count; if fewer than $m$ valid pairs exist the quantity is missing):\n\n$$\\bar{x}^{(N)}_{i,t} = \\operatorname{mean}_{s \\le t}\\!\\left[r_{i,s}\\right], \\quad\n\\bar{y}^{(N)}_{i,t} = \\operatorname{mean}_{s \\le t}\\!\\left[r_{m,s}\\right], \\quad\n\\overline{xy}^{(N)}_{i,t} = \\operatorname{mean}_{s \\le t}\\!\\left[r_{i,s} r_{m,s}\\right], \\quad\n\\overline{yy}^{(N)}_{i,t} = \\operatorname{mean}_{s \\le t}\\!\\left[r_{m,s}^{2}\\right]$$\n\n**Step 3 \u2014 Rolling beta.** For window $(N,m)$:\n\n$$\\widehat{\\beta}^{(N)}_{i,t} \\;=\\;\n\\frac{\\overline{xy}^{(N)}_{i,t} - \\bar{x}^{(N)}_{i,t}\\,\\bar{y}^{(N)}_{i,t}}\n{\\overline{yy}^{(N)}_{i,t} - \\left(\\bar{y}^{(N)}_{i,t}\\right)^{2}}\n\\quad\\text{if}\\quad \\overline{yy}^{(N)}_{i,t} - \\left(\\bar{y}^{(N)}_{i,t}\\right)^{2} > \\texttt{eps\\_var},$$\n\nand $\\widehat{\\beta}^{(N)}_{i,t}$ is **undefined (missing)** otherwise (division-by-zero / degenerate-market-variance handling).\n\nDefine the long beta $\\beta^{L}_{i,t} = \\widehat{\\beta}^{(\\texttt{N\\_beta})}_{i,t}$ (min count `N_beta_min`) and the short beta $\\beta^{S}_{i,t} = \\widehat{\\beta}^{(\\texttt{N\\_short})}_{i,t}$ (min count `N_short_min`).\n\n**Step 4 \u2014 Shrinkage toward market beta.**\n\n$$\\beta^{\\ast}_{i,t} \\;=\\; \\texttt{w\\_shrink}\\cdot \\beta^{L}_{i,t} \\;+\\; \\left(1-\\texttt{w\\_shrink}\\right)\\cdot 1$$\n\n**Step 5 \u2014 Beta drift.**\n\n$$d_{i,t} \\;=\\; \\beta^{S}_{i,t} \\;-\\; \\beta^{\\ast}_{i,t}$$\n\n**Step 6 \u2014 Cross-sectional standardisation with winsorisation.** For any cross-sectional variable $v_{i,t}$, let $V_t$ be the set of symbols with $v_{i,t}$ defined on date $t$. If $|V_t| < \\texttt{min\\_names}$ or the cross-sectional standard deviation $\\sigma_t(v) \\le \\texttt{eps\\_var}$, the z-score is undefined for all $i$ on date $t$. Otherwise:\n\n$$z_{i,t}(v) \\;=\\; \\operatorname{clip}\\!\\left(\\frac{v_{i,t} - \\mu_t(v)}{\\sigma_t(v)},\\; -\\texttt{Z\\_clip},\\; +\\texttt{Z\\_clip}\\right),\n\\qquad \\mu_t(v)=\\frac{1}{|V_t|}\\sum_{j\\in V_t} v_{j,t},\\quad \\sigma_t(v)=\\text{sample s.d. over } V_t$$\n\n**Step 7 \u2014 Raw score.**\n\n$$a_{i,t} \\;=\\; -\\Big(\\texttt{w\\_beta}\\cdot z_{i,t}\\!\\left(\\beta^{\\ast}\\right) \\;+\\; \\texttt{w\\_drift}\\cdot z_{i,t}\\!\\left(d\\right)\\Big)$$\n\n$a_{i,t}$ is missing if either z-score is missing.\n\n**Step 8 \u2014 Temporal smoothing.**\n\n$$\\tilde{a}_{i,t} \\;=\\; \\operatorname{mean}\\left[a_{i,s} : s \\le t,\\ \\text{last } \\texttt{N\\_smooth} \\text{ observations}\\right], \\quad \\text{min count } \\texttt{N\\_smooth\\_min}$$\n\n**Step 9 \u2014 Final signal (re-standardised for cross-sectional neutrality).**\n\n$$\\text{Alpha}_{i,t} \\;=\\; z_{i,t}\\!\\left(\\tilde{a}\\right)$$\n\n**Missing-value handling (explicit and exhaustive).** Missing returns are excluded from the market mean and from rolling window counts; no imputation is performed. Rolling statistics return missing until the stated minimum counts are met. Beta is undefined when market-return variance $\\le$ `eps_var`. Cross-sectional z-scores are undefined when fewer than `min_names` valid observations exist or when the cross-sectional dispersion is $\\le$ `eps_var`. Z-scores are winsorised at $\\pm$`Z_clip`. No other clipping, filling, or replacement is applied; symbols with an undefined signal on a date receive no position.\n\n# Section 3: Causal Rationale\n\nBeta measured from daily co-movement with the equal-weighted cross-sectional mean return is the observable exposure of a stock to the common market factor, and leverage-constrained investors who seek higher expected returns must obtain them by holding high-beta securities rather than by levering low-beta ones, which bids up the price of high-beta exposure and compresses its forward risk-adjusted return relative to low-beta exposure. The negative loading on shrunk beta expresses exactly this: a long tilt to low-market-sensitivity names and a short tilt to high-market-sensitivity names, with shrinkage toward 1 because a single-window regression slope estimated from noisy daily returns contains substantial estimation error that would otherwise dominate the cross-sectional ranking. The drift overlay compares a 20-day beta with the shrunk 60-day beta: a stock whose recent co-movement with the market has risen above its longer-run level is currently supplying more factor exposure than its historical profile implies, so it is more likely to be a vehicle for embedded-leverage demand and is more exposed to a subsequent factor-risk repricing, and is therefore ranked short. Both components are functions only of realised daily returns and their covariance with a return-based market proxy, so the mechanism is fully grounded in quantities computable from daily OHLCV data. Cross-sectional standardisation makes the resulting portfolio approximately dollar-neutral and forces the bet to be relative beta rather than a directional market timing bet.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses only daily point-in-time `returns` derived from OHLCV data. No fundamentals, index membership, analyst data, or any non-PIT source is used. The market proxy is constructed endogenously from the cross-section present in the data on each date, so it inherits whatever survivorship properties the input universe has; no external index series is required.\n- **Execution timing (fixed rule):** The signal for date $t$ uses only observations up to and including the market close of day $t$, and is executed at the **open of day $t+1$**. Every operation in Section 2 is a trailing (backward-looking) rolling statistic or a same-date cross-sectional statistic; no forward-looking or negative-shift operations appear. The formulation therefore complies with this rule. The execution lag is applied by the backtesting harness, not inside the signal function.\n- **Minimum trailing observations per symbol:** `N_beta_min = 40` valid daily return observations are required before the primary component is defined (the drift term additionally requires `N_short_min = 15`, which is subsumed). With smoothing, `N_smooth_min = 1` additional value suffices, so the binding requirement is **40 trailing daily observations**; in practice a symbol needs a history of at least 40 days within the trailing 60-day window.\n- **Cross-sectional requirement:** at least `min_names = 20` symbols with defined component values on a date, otherwise no signal is emitted for that date.\n- **Other bounds:** the signal is undefined for dates on which the market-proxy variance is degenerate; the strategy is only meaningful in a liquid, tradable universe since it rebalances daily and the underlying beta effect is a slow-moving, low-turnover premium \u2014 turnover control should be applied at the portfolio-construction stage, which is outside the scope of this signal.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_beta=60,\n                   N_beta_min=40,\n                   N_short=20,\n                   N_short_min=15,\n                   w_shrink=0.60,\n                   w_beta=0.70,\n                   w_drift=0.30,\n                   Z_clip=3.0,\n                   N_smooth=3,\n                   N_smooth_min=1,\n                   eps_var=1e-12,\n                   min_names=20):\n\n    work = pd.DataFrame(index=df.index)\n    work['x'] = df['returns']\n\n    mkt = df['returns'].groupby(level='date').mean()\n    work['y'] = mkt.reindex(df.index, level='date')\n\n    work['xy'] = work['x'] * work['y']\n    work['yy'] = work['y'] * work['y']\n\n    g = work.groupby(level='symbol')\n\n    def _roll_mean(col, win, minp):\n        s = g[col].rolling(window=win, min_periods=minp).mean()\n        s = s.reset_index(level=0, drop=True)\n        return s.reindex(df.index)\n\n    # Long-window beta\n    xL = _roll_mean('x', N_beta, N_beta_min)\n    yL = _roll_mean('y', N_beta, N_beta_min)\n    xyL = _roll_mean('xy', N_beta, N_beta_min)\n    yyL = _roll_mean('yy', N_beta, N_beta_min)\n    covL = xyL - xL * yL\n    varL = yyL - yL * yL\n    beta_L = (covL / varL).where(varL > eps_var)\n\n    # Short-window beta\n    xS = _roll_mean('x', N_short, N_short_min)\n    yS = _roll_mean('y', N_short, N_short_min)\n    xyS = _roll_mean('xy', N_short, N_short_min)\n    yyS = _roll_mean('yy', N_short, N_short_min)\n    covS = xyS - xS * yS\n    varS = yyS - yS * yS\n    beta_S = (covS / varS).where(varS > eps_var)\n\n    beta_star = w_shrink * beta_L + (1.0 - w_shrink) * 1.0\n    drift = beta_S - beta_star\n\n    def _cs_z(s):\n        grp = s.groupby(level='date')\n        mu = grp.transform('mean')\n        sd = grp.transform('std')\n        cnt = grp.transform('count')\n        z = (s - mu) / sd\n        z = z.where((sd > eps_var) & (cnt >= min_names))\n        return z.clip(lower=-Z_clip, upper=Z_clip)\n\n    z_beta = _cs_z(beta_star)\n    z_drift = _cs_z(drift)\n\n    raw = -(w_beta * z_beta + w_drift * z_drift)\n\n    smoothed = (raw.groupby(level='symbol')\n                   .rolling(window=N_smooth, min_periods=N_smooth_min)\n                   .mean()\n                   .reset_index(level=0, drop=True)\n                   .reindex(df.index))\n\n    alpha = _cs_z(smoothed)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "ac6773ff1ee86180194411172a352af0d483608ad168a19d3e607b085def3351",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_beta_min",
+            "N_short",
+            "N_short_min",
+            "w_shrink",
+            "w_beta",
+            "w_drift",
+            "Z_clip",
+            "N_smooth",
+            "N_smooth_min",
+            "eps_var",
+            "min_names"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1623,
+            "output_tokens": 6234,
+            "total_tokens": 7857
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

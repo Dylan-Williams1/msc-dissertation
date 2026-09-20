@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_3221e96b",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1164507530,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_mom",
+            "N_skip",
+            "eps"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-25T08:42:27.695044+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 11,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Standardized Idiosyncratic Momentum\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_beta = 60` (Lookback window in days for rolling market beta estimation)\n  - `N_mom = 20` (Lookback window in days for idiosyncratic momentum and volatility)\n  - `N_skip = 1` (Lag window in days to skip recent returns and avoid short-term reversal)\n  - `eps = 1e-8` (Small constant for numerical stability and zero-division prevention)\n- Required Inputs: `returns`\n\n---\n\n# Section 2: Mathematical Formulation\n\n1. **Cross-Sectional Market Return**:\n   For each trading day $t$, the market-wide return $R_{m,t}$ is calculated as the unweighted cross-sectional mean across all $K_t$ active assets:\n   $$R_{m,t} = \\frac{1}{K_t} \\sum_{j=1}^{K_t} R_{j,t}$$\n\n2. **Rolling Market Beta**:\n   For asset $i$ on day $t$, trailing sample covariance with market returns and rolling market variance over $N_{beta}$ days are defined as:\n   $$\\bar{R}_{i,t} = \\frac{1}{N_{beta}} \\sum_{k=0}^{N_{beta}-1} R_{i,t-k}, \\quad \\bar{R}_{m,t} = \\frac{1}{N_{beta}} \\sum_{k=0}^{N_{beta}-1} R_{m,t-k}$$\n   $$\\text{Cov}_{i,t}(R_i, R_m) = \\left( \\frac{1}{N_{beta}} \\sum_{k=0}^{N_{beta}-1} R_{i,t-k} R_{m,t-k} \\right) - \\bar{R}_{i,t} \\bar{R}_{m,t}$$\n   $$\\sigma_{m,t}^2 = \\max\\left(0, \\left( \\frac{1}{N_{beta}} \\sum_{k=0}^{N_{beta}-1} R_{m,t-k}^2 \\right) - \\bar{R}_{m,t}^2 \\right)$$\n\n    The estimated daily market beta $\\beta_{i,t}$ is:\n   $$\\beta_{i,t} = \\frac{\\text{Cov}_{i,t}(R_i, R_m)}{\\sigma_{m,t}^2 + \\epsilon}$$\n\n3. **Daily Idiosyncratic Residual Return**:\n   The market beta-decomposed residual return for asset $i$ on day $t$ is:\n   $$\\epsilon_{i,t} = R_{i,t} - \\beta_{i,t} R_{m,t}$$\n\n4. **Skip-Lagged Idiosyncratic Momentum**:\n   The accumulated idiosyncratic return over $N_{mom}$ days, excluding the most recent $N_{skip}$ days, is:\n   $$\\text{IdioMom}_{i,t} = \\sum_{k=0}^{N_{mom}-1} \\epsilon_{i,t-k} - \\sum_{k=0}^{N_{skip}-1} \\epsilon_{i,t-k}$$\n   (If $N_{skip} = 0$, the second summation evaluates to $0$).\n\n5. **Risk-Standardized Signal**:\n   Trailing idiosyncratic volatility $\\sigma_{\\epsilon,i,t}$ over $N_{mom}$ days is given by:\n   $$\\sigma_{\\epsilon,i,t} = \\sqrt{\\frac{1}{N_{mom}-1} \\sum_{k=0}^{N_{mom}-1} (\\epsilon_{i,t-k} - \\bar{\\epsilon}_{i,t})^2}$$\n   where $\\bar{\\epsilon}_{i,t} = \\frac{1}{N_{mom}} \\sum_{k=0}^{N_{mom}-1} \\epsilon_{i,t-k}$.\n\n   The raw risk-adjusted idiosyncratic momentum signal $S_{i,t}$ is:\n   $$S_{i,t} = \\frac{\\text{IdioMom}_{i,t}}{\\sigma_{\\epsilon,i,t} + \\epsilon}$$\n\n6. **Cross-Sectional Standardization**:\n   The final alpha signal $\\alpha_{i,t}$ is the cross-sectional z-score on day $t$:\n   $$\\alpha_{i,t} = \\frac{S_{i,t} - \\mu_{S,t}}{\\sigma_{S,t} + \\epsilon}$$\n   where $\\mu_{S,t} = \\frac{1}{K_t} \\sum_{j=1}^{K_t} S_{j,t}$ and $\\sigma_{S,t} = \\sqrt{\\frac{1}{K_t-1} \\sum_{j=1}^{K_t} (S_{j,t} - \\mu_{S,t})^2}$.\n\n7. **Handling Undefined / Missing Values**:\n   - Rolling operations require a minimum observation count of $N_{beta}$ for beta estimation and $N_{mom}$ for residual momentum and volatility calculations; windows with fewer observations produce `NaN`.\n   - Negative floating-point values in market variance calculations are bounded at zero using `max(0, x)`.\n   - Division by zero is prevented across all steps by adding `eps` ($10^{-8}$) to denominators.\n\n---\n\n# Section 3: Causal Rationale\n\nStandard price momentum strategies suffer from time-varying exposure to market beta, leaving them vulnerable to severe drawdowns during macro market trend reversals. By stripping out systematic return components driven by rolling market beta, this signal isolates purely stock-specific residual return dynamics. Market participants absorb micro, stock-specific news items more slowly than broad macroeconomic events, creating persistent drift in residual returns. Normalizing cumulative residual momentum by daily idiosyncratic volatility accounts for signal noise, prioritizing high-conviction firm-specific trends that generate cross-sectional alpha.\n\n---\n\n# Section 4: Structural Bounds\n\n- **Point-in-Time Confirmation**: The alpha formulation strictly relies on point-in-time daily returns derived from historical price series up to day $t$.\n- **Execution Timing Rule**: The signal $\\alpha_{i,t}$ is calculated using market data available through the close of trading on day $t$. Positions are entered at the OPEN of day $t+1$. The output Series is aligned to date $t$ without applying forward lookahead or execution shifts inside the signal function.\n- **Minimum Observation Requirement**: A minimum of $N_{beta} = 60$ contiguous daily observations per symbol is required to compute the rolling beta before a valid alpha score is generated.\n\n---\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_beta=60, N_mom=20, N_skip=1, eps=1e-8):\n    returns = df[\"returns\"]\n\n    # Market return (cross-sectional mean return at day t)\n    r_m = returns.groupby(level=\"date\").transform(\"mean\")\n\n    # Rolling beta components over N_beta window\n    mean_ri = returns.groupby(level=\"symbol\").transform(\n        lambda s: s.rolling(N_beta, min_periods=N_beta).mean()\n    )\n    mean_rm = r_m.groupby(level=\"symbol\").transform(\n        lambda s: s.rolling(N_beta, min_periods=N_beta).mean()\n    )\n    mean_prod = (\n        (returns * r_m)\n        .groupby(level=\"symbol\")\n        .transform(lambda s: s.rolling(N_beta, min_periods=N_beta).mean())\n    )\n    mean_rm_sq = (\n        (r_m**2)\n        .groupby(level=\"symbol\")\n        .transform(lambda s: s.rolling(N_beta, min_periods=N_beta).mean())\n    )\n\n    cov_ri_rm = mean_prod - (mean_ri * mean_rm)\n    var_rm = (mean_rm_sq - (mean_rm**2)).clip(lower=0.0)\n\n    beta = cov_ri_rm / (var_rm + eps)\n\n    # Idiosyncratic daily return\n    resid = returns - (beta * r_m)\n\n    # Idiosyncratic momentum over N_mom with N_skip lag\n    sum_mom = resid.groupby(level=\"symbol\").transform(\n        lambda s: s.rolling(N_mom, min_periods=N_mom).sum()\n    )\n    sum_skip = (\n        resid.groupby(level=\"symbol\").transform(\n            lambda s: s.rolling(N_skip, min_periods=N_skip).sum()\n        )\n        if N_skip > 0\n        else 0.0\n    )\n    idio_mom = sum_mom - sum_skip\n\n    # Trailing idiosyncratic volatility\n    idio_vol = resid.groupby(level=\"symbol\").transform(\n        lambda s: s.rolling(N_mom, min_periods=N_mom).std()\n    )\n\n    # Risk-standardized raw signal\n    s_raw = idio_mom / (idio_vol + eps)\n\n    # Cross-sectional z-score standardization\n    mean_s = s_raw.groupby(level=\"date\").transform(\"mean\")\n    std_s = s_raw.groupby(level=\"date\").transform(\"std\")\n\n    alpha = (s_raw - mean_s) / (std_s + eps)\n\n    return alpha\n```",
+    "response_sha256": "d18503a93ca74d7aab77b75b3c6d7a2cb58d51c4e35d071bb814f9b17187af0f",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_mom",
+            "N_skip",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1164507530,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 2166,
+            "total_tokens": 10731
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

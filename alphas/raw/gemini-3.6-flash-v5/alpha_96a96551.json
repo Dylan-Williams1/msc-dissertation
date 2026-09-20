@@ -1,0 +1,74 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_96a96551",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1164507530,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "eps"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-24T18:37:59.989540+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 11,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volatility-Adjusted Intraday Reversion (VAIR)\n- Holding Period: 1 day\n- Orientation: Long/Short\n- Parameters: `N_vol = 20`, `eps = 1e-8`\n- Required Inputs: `high`, `low`, `close`\n\n# Section 2: Mathematical Formulation\n\nFor asset $i$ on trading day $t$:\n\n1. Intraday Relative Range ($DRR_{i,t}$):\n$$DRR_{i,t} = \\frac{High_{i,t} - Low_{i,t}}{Close_{i,t}}$$\n\n2. Rolling Range Volatility Baseline ($B_{i,t}$):\n$$B_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} DRR_{i,t-k}$$\n\n3. Volatility Expansion Multiplier ($VM_{i,t}$):\n$$VM_{i,t} = \\frac{DRR_{i,t}}{B_{i,t} + \\epsilon}$$\n\n4. Intraday Directional Location ($IDL_{i,t}$):\n$$IDL_{i,t} = \\frac{2 \\cdot Close_{i,t} - (High_{i,t} + Low_{i,t})}{High_{i,t} - Low_{i,t} + \\epsilon}$$\n\n5. Raw Signal ($S_{i,t}$):\n$$S_{i,t} = - IDL_{i,t} \\cdot VM_{i,t}$$\n\n6. Cross-Sectional Normalized Signal ($\\alpha_{i,t}$):\n$$\\alpha_{i,t} = \\frac{S_{i,t} - \\mu_t(S_{\\cdot,t})}{\\sigma_t(S_{\\cdot,t}) + \\epsilon}$$\n\nwhere $\\mu_t(S_{\\cdot,t})$ and $\\sigma_t(S_{\\cdot,t})$ denote the cross-sectional mean and cross-sectional sample standard deviation across all valid universe symbols on date $t$.\n\n**Handling of Undefined Values and Edge Cases:**\n- Minimum Observation Count: A minimum of $N_{vol}$ consecutive daily observations per symbol is required to evaluate $B_{i,t}$. Any asset with fewer than $N_{vol}$ valid trailing observations receives a `NaN` signal.\n- Division by Zero: Division operations are safeguarded by adding the explicit parameter $\\epsilon = 1\\times 10^{-8}$ to all denominators.\n- Missing Observations: If any input market variable ($High_{i,t}, Low_{i,t}, Close_{i,t}$) is missing or invalid on day $t$, the resulting raw signal $S_{i,t}$ evaluates to `NaN` and is excluded from cross-sectional mean and standard deviation calculations.\n\n# Section 3: Causal Rationale\n\nTemporary liquidity imbalances during high-volatility trading sessions frequently force asset prices to close near intraday extremes due to aggressive execution of market-on-close orders. When daily range volatility expands significantly relative to its medium-term baseline ($VM_{i,t} > 1$), extreme close location ($IDL_{i,t}$) represents short-term order flow exhaustion rather than sustained fundamental revaluation. The alpha takes a counter-directional position against these volatility-amplified intraday extensions, expecting price mean-reversion as market liquidity normalizes during the subsequent trading session.\n\n# Section 4: Structural Bounds\n\n- **Point-in-Time Data Guarantee:** The alpha signal relies exclusively on Point-in-Time (PIT) daily OHLCV market data available up to day $t$.\n- **Execution Timing Rule:** Signal $\\alpha_{i,t}$ is computed at the close of trading day $t$ using information up to and including day $t$ close. Trades are executed at the OPEN of trading day $t+1$.\n- **Minimum Observation Requirement:** A minimum trailing window of $N_{vol} = 20$ trading days of continuous market data per symbol is required before a valid signal can be generated.\n\n# Section 5: Python Implementation\n\n```python\nimport pandas as pd\nimport numpy as np\n\ndef generate_alpha(df, N_vol=20, eps=1e-8):\n    # Step 1: Intraday Relative Range\n    drr = (df['high'] - df['low']) / df['close']\n    \n    # Step 2: Rolling Range Volatility Baseline\n    b = drr.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n    \n    # Step 3: Volatility Expansion Multiplier\n    vm = drr / (b + eps)\n    \n    # Step 4: Intraday Directional Location\n    idl = (2.0 * df['close'] - (df['high'] + df['low'])) / (df['high'] - df['low'] + eps)\n    \n    # Step 5: Raw Signal\n    raw_signal = - idl * vm\n    \n    # Step 6: Cross-Sectional Normalization\n    mean_s = raw_signal.groupby(level='date').transform('mean')\n    std_s = raw_signal.groupby(level='date').transform('std')\n    \n    alpha = (raw_signal - mean_s) / (std_s + eps)\n    \n    return alpha\n```",
+    "response_sha256": "c15aae0f34719fe5e33e2873860ea4c3751c0175cf72ba09a286c4889bf16770",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1164507530,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1211,
+            "total_tokens": 6250
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

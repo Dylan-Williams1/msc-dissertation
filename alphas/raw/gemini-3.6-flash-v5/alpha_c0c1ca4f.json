@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_c0c1ca4f",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1807105615,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_long",
+            "N_short",
+            "N_vol",
+            "min_periods_vol",
+            "eps"
+        ],
+        "theme": "long_term_reversal",
+        "theme_title": "long-term reversal",
+        "timestamp_utc": "2026-08-24T18:32:13.230682+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 6,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7897b46d025c1a57d269c5acaac1ce9fa9e52fb1c4a5361f680638372ce114a9",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volatility_Standardized_Long_Term_Reversal\n- Holding Period: 21 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_long = 252`\n  - `N_short = 21`\n  - `N_vol = 252`\n  - `min_periods_vol = 126`\n  - `eps = 1e-8`\n- Required Inputs: `returns`\n\n# Section 2: Mathematical Formulation\nLet $R_{i,t}$ be the daily arithmetic return for asset $i$ on day $t$.\n\n1. Compute daily log returns:\n$$r_{i,t} = \\ln(1 + R_{i,t})$$\n\n2. Compute the cumulative log return over the long-term window excluding the most recent short-term window $[t - N_{long} + 1, t - N_{short}]$:\n$$L_{i,t} = \\sum_{k=N_{short}}^{N_{long}-1} r_{i,t-k}$$\n\n3. Convert cumulative log return back to cumulative arithmetic return:\n$$C_{i,t} = \\exp(L_{i,t}) - 1$$\n\n4. Compute the rolling sample standard deviation of daily returns over lookback $N_{vol}$:\n$$\\sigma_{i,t} = \\sqrt{\\frac{1}{M_{vol,i,t} - 1} \\sum_{k=0}^{N_{vol}-1} (R_{i,t-k} - \\bar{R}_{i,t})^2}$$\nwhere $\\bar{R}_{i,t} = \\frac{1}{M_{vol,i,t}} \\sum_{k=0}^{N_{vol}-1} R_{i,t-k}$, and $M_{vol,i,t}$ is the number of valid daily return observations in $[t - N_{vol} + 1, t]$.\n\n5. Calculate the volatility-standardized long-term return:\n$$S_{i,t} = \\frac{C_{i,t}}{\\max(\\sigma_{i,t}, \\text{eps})}$$\n\n6. Compute cross-sectional z-score on each date $t$ across all assets with valid $S_{i,t}$:\n$$\\mu_t = \\frac{1}{K_t} \\sum_{i=1}^{K_t} S_{i,t}$$\n$$\\sigma_{c,t} = \\sqrt{\\frac{1}{K_t - 1} \\sum_{i=1}^{K_t} (S_{i,t} - \\mu_t)^2}$$\n$$Z_{i,t} = \\begin{cases} \\frac{S_{i,t} - \\mu_t}{\\max(\\sigma_{c,t}, \\text{eps})} & \\text{if } K_t \\ge 2 \\\\ 0 & \\text{if } K_t < 2 \\end{cases}$$\n\n7. The final long-term reversal alpha signal $\\alpha_{i,t}$ negates the standardized return:\n$$\\alpha_{i,t} = -Z_{i,t}$$\n\nHandling of Undefined Values:\n- $L_{i,t}$ requires a full trailing window of $N_{long}$ observations; if fewer are available, $L_{i,t}$ and $C_{i,t}$ evaluate to NaN.\n- $\\sigma_{i,t}$ requires at least $M_{vol,i,t} \\ge \\text{min\\_periods\\_vol}$ observations; if fewer are available, $\\sigma_{i,t}$ evaluates to NaN.\n- If $S_{i,t}$ is NaN, the alpha signal $\\alpha_{i,t}$ is set to NaN.\n- Zero-division in volatility standardization and cross-sectional normalization is prevented by clamping denominators to a minimum of $\\text{eps} = 10^{-8}$.\n\n# Section 3: Causal Rationale\nLong-term reversal is driven by behavioral overreaction and structural capital misallocation over multi-month horizons. Market participants systematically over-extrapolate multi-quarter fundamental trends, driving past long-term outperforming equities above intrinsic value and underperforming equities below intrinsic value. Excluding the trailing month ($N_{short} = 21$) isolates the long-term trend from short-term momentum and market microstructure noise. Scaling cumulative returns by trailing daily volatility adjusts for risk-compensation, ensuring that high-beta or high-volatility noise does not dominate the long-term mispricing signal. Over the subsequent holding period, fundamental anchoring induces price mean reversion, yielding positive expected excess returns for long positions in historical underperformers and short positions in historical outperformers.\n\n# Section 4: Structural Bounds\n- Data Integrity: The strategy relies exclusively on Point-in-Time (PIT) daily OHLCV and return data.\n- Execution Timing: Signal $\\alpha_{i,t}$ is calculated at the market close of day $t$ using information available up to and including day $t$. Trade execution occurs at the market OPEN of day $t+1$. The formulation contains no forward-looking operations or implicit execution lags inside the signal function.\n- Minimum History Requirement: A minimum of $N_{long} = 252$ trailing trading days of continuous return data per symbol is required before a non-NaN signal is defined.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\ndef generate_alpha(df, N_long=252, N_short=21, N_vol=252, min_periods_vol=126, eps=1e-8):\n    # Step 1: Compute daily log returns\n    log_ret = np.log1p(df['returns'])\n\n    # Step 2 & 3: Compute cumulative return over window [t - N_long + 1, t - N_short]\n    window_cum = N_long - N_short\n    shifted_log_ret = log_ret.groupby(level='symbol', group_keys=False).shift(N_short)\n    cum_log_ret = shifted_log_ret.groupby(level='symbol', group_keys=False).transform(\n        lambda x: x.rolling(window=window_cum, min_periods=window_cum).sum()\n    )\n    C = np.expm1(cum_log_ret)\n\n    # Step 4: Compute rolling sample volatility of daily arithmetic returns\n    vol = df.groupby(level='symbol', group_keys=False)['returns'].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=min_periods_vol).std()\n    )\n\n    # Step 5: Volatility-standardized long-term return\n    vol_clamped = np.maximum(vol, eps)\n    S = C / vol_clamped\n\n    # Step 6: Cross-sectional z-score per date\n    mean_s = S.groupby(level='date', group_keys=False).transform('mean')\n    std_s = S.groupby(level='date', group_keys=False).transform('std')\n    count_s = S.groupby(level='date', group_keys=False).transform('count')\n\n    std_s_clamped = np.maximum(std_s, eps)\n    z_score = (S - mean_s) / std_s_clamped\n    z_score = z_score.where(count_s >= 2, 0.0)\n\n    # Step 7: Final negated reversal alpha signal\n    alpha = -z_score\n    alpha = alpha.where(S.notna(), np.nan)\n\n    return alpha\n```",
+    "response_sha256": "443f15210a1d60b5bc4dd4acfd01d59f76a35edaf501fb0d54b6796e51867796",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_long",
+            "N_short",
+            "N_vol",
+            "min_periods_vol",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1807105615,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1727,
+            "total_tokens": 8587
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

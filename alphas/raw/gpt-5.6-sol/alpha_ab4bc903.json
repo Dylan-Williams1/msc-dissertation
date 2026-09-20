@@ -1,0 +1,96 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_ab4bc903",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_form",
+            "N_skip"
+        ],
+        "theme": "long_term_reversal",
+        "theme_title": "long-term reversal",
+        "timestamp_utc": "2026-08-21T00:09:03.145286+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 6,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1807105615,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7897b46d025c1a57d269c5acaac1ce9fa9e52fb1c4a5361f680638372ce114a9",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Skip-Month Volatility-Scaled Long-Term Reversal\n- **Holding Period:** 21 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_form = 231`: Number of daily returns in the long-term formation window\n  - `N_skip = 21`: Number of most recent trading observations excluded from the formation window\n- **Required Inputs:** `close`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\), let \\(C_{i,t}\\) denote its closing price on trading observation \\(t\\). Define the close-to-close return as\n\n\\[\nr_{i,t}=\\frac{C_{i,t}}{C_{i,t-1}}-1.\n\\]\n\nExclude the most recent \\(N_{\\text{skip}}\\) observations and calculate the mean return over the preceding \\(N_{\\text{form}}\\) observations:\n\n\\[\n\\mu_{i,t}\n=\n\\frac{1}{N_{\\text{form}}}\n\\sum_{k=N_{\\text{skip}}}^{N_{\\text{skip}}+N_{\\text{form}}-1}\nr_{i,t-k}.\n\\]\n\nOver the same formation window, calculate the root mean square return:\n\n\\[\nv_{i,t}\n=\n\\sqrt{\n\\frac{1}{N_{\\text{form}}}\n\\sum_{k=N_{\\text{skip}}}^{N_{\\text{skip}}+N_{\\text{form}}-1}\nr_{i,t-k}^{2}\n}.\n\\]\n\nThe raw long-term reversal score is\n\n\\[\nq_{i,t}=-\\frac{\\mu_{i,t}}{v_{i,t}}.\n\\]\n\nThus, securities with more negative volatility-scaled long-term returns receive larger raw scores.\n\nLet \\(\\mathcal U_t\\) be the set of symbols with defined \\(q_{i,t}\\) on date \\(t\\). Assign an average-tie percentile rank:\n\n\\[\np_{i,t}\n=\n\\frac{\n\\operatorname{Rank}_{\\mathcal U_t}^{\\mathrm{avg}}(q_{i,t})\n}{\n|\\mathcal U_t|\n}.\n\\]\n\nThe final cross-sectionally centered alpha is\n\n\\[\n\\alpha_{i,t}\n=\np_{i,t}\n-\n\\frac{1}{|\\mathcal U_t|}\n\\sum_{j\\in\\mathcal U_t}p_{j,t}.\n\\]\n\nEach rolling calculation requires exactly `N_form` valid return observations in the specified formation window. Returns are undefined when either required close is missing, non-finite, or when the preceding close equals zero; non-finite derived returns are also treated as missing. If \\(v_{i,t}=0\\), \\(q_{i,t}\\) and the final signal are undefined for that symbol-date. Missing observations are not imputed, undefined scores are excluded from cross-sectional ranking, and no clipping is applied.\n\n## Section 3: Causal Rationale\n\nThe average close-to-close return over a multi-month window proxies persistent directional price displacement observable directly from daily prices. Large long-horizon displacements can partially reverse when prior price changes exceeded the subsequent information incorporated into closing prices. Excluding the most recent month reduces overlap with short-term continuation effects, while RMS scaling prevents mechanically favoring securities merely because they exhibit larger daily fluctuations. The cross-sectional construction therefore buys prior volatility-adjusted losers and shorts prior volatility-adjusted winners.\n\n## Section 4: Structural Bounds\n\nThe strategy relies solely on Point-in-Time (PIT) daily OHLCV data, specifically PIT closing prices; revised or retrospectively reconstructed non-PIT observations must not be used. The signal for day \\(t\\) is generated after the market close using only data available up to and including that close, and execution occurs at the open of day \\(t+1\\). The formulation complies with this timing rule because all included returns end no later than observation \\(t-N_{\\text{skip}}\\), and no future data are used.\n\nA symbol requires at least\n\n\\[\nN_{\\text{form}}+N_{\\text{skip}}+1=253\n\\]\n\ntrailing close observations, including day \\(t\\), because the earliest formation-window return requires one additional preceding close. All `N_form` returns within the formation window must also be valid.\n\n## Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\ndef generate_alpha(df, N_form=231, N_skip=21):\n    x = df.sort_index(level=[\"symbol\", \"date\"])\n\n    previous_close = x.groupby(level=\"symbol\")[\"close\"].shift(1)\n    valid_previous_close = previous_close.where(previous_close.ne(0))\n\n    daily_return = x[\"close\"].div(valid_previous_close).sub(1)\n    daily_return = daily_return.where(np.isfinite(daily_return))\n\n    lagged_return = daily_return.groupby(level=\"symbol\").shift(N_skip)\n\n    mean_return = (\n        lagged_return.groupby(level=\"symbol\")\n        .rolling(window=N_form, min_periods=N_form)\n        .mean()\n        .droplevel(0)\n    )\n\n    mean_squared_return = (\n        lagged_return.pow(2)\n        .groupby(level=\"symbol\")\n        .rolling(window=N_form, min_periods=N_form)\n        .mean()\n        .droplevel(0)\n    )\n\n    rms_return = np.sqrt(mean_squared_return)\n    raw_score = -mean_return.div(rms_return.where(rms_return.ne(0)))\n\n    percentile_rank = raw_score.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True\n    )\n    alpha = percentile_rank - percentile_rank.groupby(level=\"date\").transform(\"mean\")\n\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "261d4a815fe4169a831f8b1a9ab9c5a726e062f210975d56f5e8a0ff5deaa9c9",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_form",
+            "N_skip"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 998,
+            "output_tokens": 4278,
+            "total_tokens": 5276
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

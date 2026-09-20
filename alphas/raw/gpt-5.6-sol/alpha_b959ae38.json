@@ -1,0 +1,104 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_b959ae38",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_smooth",
+            "theta_expand",
+            "V_floor",
+            "E_floor"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-21T00:14:07.763899+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 10,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1609573728,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Directional True-Range Expansion\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_vol = 20`: lookback for lagged average true range\n  - `N_smooth = 3`: lookback for signal smoothing\n  - `theta_expand = 1.25`: minimum true-range expansion ratio\n  - `V_floor = 0.0`: strict lower bound for valid volatility denominators\n  - `E_floor = 0.0`: lower clipping bound for excess range expansion\n- **Required Inputs:** `open`, `high`, `low`, `close`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on day \\(t\\), let \\(O_{i,t}\\), \\(H_{i,t}\\), \\(L_{i,t}\\), and \\(C_{i,t}\\) denote the daily open, high, low, and close.\n\nDefine true range as:\n\n\\[\nTR_{i,t}\n=\n\\max\\left(\nH_{i,t}-L_{i,t},\n\\left|H_{i,t}-C_{i,t-1}\\right|,\n\\left|L_{i,t}-C_{i,t-1}\\right|\n\\right).\n\\]\n\nIf \\(C_{i,t-1}\\) is missing, the two gap terms are omitted and:\n\n\\[\nTR_{i,t}=H_{i,t}-L_{i,t}.\n\\]\n\nThe lagged average true range is:\n\n\\[\nATR_{i,t}\n=\n\\frac{1}{N_{\\text{vol}}}\n\\sum_{k=1}^{N_{\\text{vol}}}TR_{i,t-k}.\n\\]\n\nIt excludes day \\(t\\). It is defined only when all \\(N_{\\text{vol}}\\) lagged true-range observations are non-missing.\n\nThe directional candle component is:\n\n\\[\nD_{i,t}\n=\n\\frac{C_{i,t}-O_{i,t}}{TR_{i,t}},\n\\]\n\ndefined only when:\n\n\\[\nTR_{i,t}>V_{\\text{floor}}.\n\\]\n\nThe true-range expansion ratio is:\n\n\\[\nQ_{i,t}\n=\n\\frac{TR_{i,t}}{ATR_{i,t}},\n\\]\n\ndefined only when:\n\n\\[\nATR_{i,t}>V_{\\text{floor}}.\n\\]\n\nThe thresholded excess expansion is:\n\n\\[\nE_{i,t}\n=\n\\max\\left(Q_{i,t}-\\theta_{\\text{expand}},E_{\\text{floor}}\\right).\n\\]\n\nIf \\(Q_{i,t}\\) is undefined, \\(E_{i,t}\\) remains undefined rather than being imputed.\n\nThe daily raw signal is:\n\n\\[\nX_{i,t}=D_{i,t}E_{i,t}.\n\\]\n\nSmooth it over the most recent \\(N_{\\text{smooth}}\\) observations:\n\n\\[\nS_{i,t}\n=\n\\frac{1}{N_{\\text{smooth}}}\n\\sum_{j=0}^{N_{\\text{smooth}}-1}X_{i,t-j}.\n\\]\n\nThe smoothed signal is defined only when all \\(N_{\\text{smooth}}\\) raw observations are non-missing.\n\nFor each date \\(t\\), calculate the average-tie percentile rank of \\(S_{i,t}\\) across symbols with defined signals:\n\n\\[\nP_{i,t}\n=\n\\frac{\\operatorname{Rank}^{\\mathrm{avg}}_t(S_{i,t})}{n_t},\n\\]\n\nwhere \\(n_t\\) is the number of symbols with defined \\(S_{i,t}\\). The final alpha is the cross-sectionally centered percentile rank:\n\n\\[\n\\alpha_{i,t}\n=\nP_{i,t}\n-\n\\frac{1}{n_t}\\sum_{j \\in \\mathcal{U}_t}P_{j,t},\n\\]\n\nwhere \\(\\mathcal{U}_t\\) is the set of symbols with defined smoothed signals.\n\nCurrent `open`, `high`, `low`, and `close` must all be non-missing. Missing signals are excluded from cross-sectional ranking and remain missing. A one-symbol valid cross-section produces zero after centering; an empty valid cross-section remains undefined. No imputation or explicit infinity replacement is performed, and finite input data are assumed. The only clipping operation is the stated lower bound on \\(E_{i,t}\\).\n\n## Section 3: Causal Rationale\n\nTrue range measures realized daily volatility while incorporating both intraday range and overnight price gaps. A true range materially above its lagged baseline identifies volatility expansion, while the normalized open-to-close move records whether that expansion resolved upward or downward. Closing in the direction of a large volatility expansion can reflect incomplete short-horizon price adjustment, creating a continuation signal over the following few sessions. Thresholding removes ordinary range fluctuations, and cross-sectional ranking reduces dependence on persistent differences in volatility scale across symbols.\n\n## Section 4: Structural Bounds\n\n- The strategy relies solely on Point-in-Time (PIT) daily OHLCV data; this formulation uses only PIT `open`, `high`, `low`, and `close`.\n- The signal for day \\(t\\) is generated using only data available up to the market close on day \\(t\\).\n- Execution occurs at the **open of day \\(t+1\\)**.\n- The formulation complies with this timing rule because all rolling calculations are backward-looking, the volatility baseline excludes day \\(t\\), and no future observations or negative shifts are used.\n- The minimum number of trailing symbol observations, including day \\(t\\), is:\n\n\\[\nN_{\\text{vol}}+N_{\\text{smooth}}.\n\\]\n\n- With the default parameters, the minimum is \\(20+3=23\\) observations. All required rolling-window observations and the current OHLC values must be valid.\n\n## Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\ndef generate_alpha(\n    df,\n    N_vol=20,\n    N_smooth=3,\n    theta_expand=1.25,\n    V_floor=0.0,\n    E_floor=0.0\n):\n    original_index = df.index\n    df = df.sort_index(level=[\"symbol\", \"date\"])\n\n    previous_close = df.groupby(level=\"symbol\")[\"close\"].shift(1)\n\n    true_range = pd.concat(\n        [\n            df[\"high\"] - df[\"low\"],\n            (df[\"high\"] - previous_close).abs(),\n            (df[\"low\"] - previous_close).abs(),\n        ],\n        axis=1,\n    ).max(axis=1, skipna=True)\n\n    current_ohlc_valid = df[[\"open\", \"high\", \"low\", \"close\"]].notna().all(axis=1)\n    true_range = true_range.where(current_ohlc_valid)\n\n    lagged_true_range = true_range.groupby(level=\"symbol\").shift(1)\n\n    average_true_range = (\n        lagged_true_range.groupby(level=\"symbol\")\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .droplevel(0)\n    )\n\n    direction = (\n        (df[\"close\"] - df[\"open\"]) / true_range\n    ).where(true_range > V_floor)\n\n    expansion_ratio = (\n        true_range / average_true_range\n    ).where(average_true_range > V_floor)\n\n    excess_expansion = (\n        expansion_ratio - theta_expand\n    ).clip(lower=E_floor)\n\n    raw_signal = direction * excess_expansion\n\n    smoothed_signal = (\n        raw_signal.groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n    )\n\n    percentile_rank = smoothed_signal.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True,\n    )\n\n    alpha = percentile_rank - percentile_rank.groupby(level=\"date\").transform(\"mean\")\n\n    return alpha.reindex(original_index)\n```",
+    "response_sha256": "a6972a684d40f7c31ceccb56f81eebfd6a6c463ff99685e8272826c61d74541d",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_smooth",
+            "theta_expand",
+            "V_floor",
+            "E_floor"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4477,
+            "total_tokens": 5473
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

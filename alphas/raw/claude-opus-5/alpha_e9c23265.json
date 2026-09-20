@@ -1,0 +1,112 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_e9c23265",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_vol",
+            "N_amihud",
+            "N_range",
+            "N_dvol",
+            "N_smooth",
+            "min_frac",
+            "winsor_z",
+            "eps",
+            "min_names",
+            "dvol_pct"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-20T23:32:53.811675+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 3,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1312298517,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Illiquidity-Scaled Intraday-Absorption Reversal (ISIAR)\n- **Holding Period:** 5 trading days (signal recomputed daily; expected turnover consistent with a ~5-day horizon)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional demeaning of a rank-based score)\n- **Parameters:**\n  - `N_rev = 5` \u2014 lookback window (days) over which the cumulative reversal displacement is measured\n  - `N_vol = 20` \u2014 lookback window for realised return volatility used to normalise the displacement\n  - `N_amihud = 20` \u2014 lookback window for the Amihud-style illiquidity/impact measure\n  - `N_range = 20` \u2014 lookback window for the average normalised intraday (high\u2013low) range\n  - `N_dvol = 20` \u2014 lookback window for average dollar volume used in the liquidity eligibility filter\n  - `N_smooth = 3` \u2014 smoothing span (simple moving average, in days) applied to the final cross-sectional score\n  - `min_frac = 0.8` \u2014 minimum fraction of a rolling window that must be non-missing for the statistic to be defined\n  - `winsor_z = 3.0` \u2014 absolute clip level applied to the normalised displacement before ranking\n  - `eps = 1e-12` \u2014 numerical floor added to denominators to avoid division by zero\n  - `min_names = 20` \u2014 minimum number of eligible symbols on a date for the cross-section to be scored\n  - `dvol_pct = 0.20` \u2014 bottom cross-sectional percentile of average dollar volume excluded from the universe\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (daily, point-in-time)\n\n# Section 2: Mathematical Formulation\n\n**Notation.** For symbol $i$ on trading day $t$: $O_{i,t}, H_{i,t}, L_{i,t}, C_{i,t}$ are open, high, low, close; $V_{i,t}$ is share volume; $r_{i,t}$ is the daily simple return. Let $\\mathcal{U}_t$ denote the set of symbols with a defined score on date $t$.\n\n**Step 1 \u2014 Cumulative short-horizon displacement.**\n$$\nD_{i,t} \\;=\\; \\sum_{k=0}^{N_{rev}-1} r_{i,t-k}\n$$\nDefined only if at least $\\lceil min\\_frac \\cdot N_{rev}\\rceil$ of the $N_{rev}$ returns are non-missing.\n\n**Step 2 \u2014 Realised volatility scaling.**\n$$\n\\sigma_{i,t} \\;=\\; \\sqrt{\\frac{1}{N_{vol}-1}\\sum_{k=0}^{N_{vol}-1}\\left(r_{i,t-k}-\\bar r_{i,t}\\right)^2},\n\\qquad\n\\bar r_{i,t}=\\frac{1}{N_{vol}}\\sum_{k=0}^{N_{vol}-1} r_{i,t-k}\n$$\nDefined only if at least $\\lceil min\\_frac\\cdot N_{vol}\\rceil$ observations are non-missing.\n\nThe risk-normalised displacement is\n$$\nZ_{i,t} \\;=\\; \\frac{D_{i,t}}{\\sqrt{N_{rev}}\\,\\sigma_{i,t}+\\varepsilon},\\qquad \\varepsilon = eps,\n$$\nand it is winsorised:\n$$\n\\tilde Z_{i,t} \\;=\\; \\max\\!\\left(-winsor\\_z,\\ \\min\\!\\left(winsor\\_z,\\ Z_{i,t}\\right)\\right).\n$$\n\n**Step 3 \u2014 Intraday absorption ratio (how much range the move consumed).**\nDaily normalised true range, using the previous close $C_{i,t-1}$:\n$$\nTR_{i,t} \\;=\\; \\frac{\\max\\!\\left(H_{i,t},\\,C_{i,t-1}\\right)-\\min\\!\\left(L_{i,t},\\,C_{i,t-1}\\right)}{C_{i,t-1}+\\varepsilon}\n$$\nAverage normalised range:\n$$\n\\overline{TR}_{i,t}\\;=\\;\\frac{1}{N_{range}}\\sum_{k=0}^{N_{range}-1} TR_{i,t-k}\n$$\n(defined with at least $\\lceil min\\_frac\\cdot N_{range}\\rceil$ observations). Realised path length over the reversal window:\n$$\nP_{i,t}\\;=\\;\\sum_{k=0}^{N_{rev}-1} TR_{i,t-k}\n$$\nThe **absorption ratio** measures how directional the recent path was:\n$$\nA_{i,t} \\;=\\; \\frac{\\left|\\sum_{k=0}^{N_{rev}-1}\\left(\\dfrac{C_{i,t-k}-O_{i,t-k}}{C_{i,t-k-1}+\\varepsilon}\\right)\\right|}{P_{i,t}+\\varepsilon}\\ \\in[0,1]\n$$\nA high $A_{i,t}$ means the cumulative move was achieved with little offsetting intraday churn (a persistent, one-sided push); a low $A_{i,t}$ means the same net displacement came with heavy two-sided trading.\n\n**Step 4 \u2014 Price-impact (illiquidity) intensity.**\nAmihud-style daily impact, with dollar volume $DV_{i,t}=C_{i,t}\\,V_{i,t}$:\n$$\nILL_{i,t}\\;=\\;\\frac{1}{N_{amihud}}\\sum_{k=0}^{N_{amihud}-1}\\frac{|r_{i,t-k}|}{DV_{i,t-k}+\\varepsilon}\n$$\n(defined with at least $\\lceil min\\_frac\\cdot N_{amihud}\\rceil$ observations). Because $ILL$ is heavily right-skewed and scale-dependent, it enters only through its cross-sectional rank:\n$$\n\\rho^{ILL}_{i,t} \\;=\\; \\frac{\\operatorname{rank}_{j\\in\\mathcal{U}_t}\\!\\left(ILL_{j,t}\\right)-1}{\\left|\\mathcal{U}_t\\right|-1}\\ \\in[0,1]\n$$\nwith ranks computed by the average method over ties.\n\n**Step 5 \u2014 Range-normalised displacement rank.** Also rank the winsorised displacement cross-sectionally:\n$$\n\\rho^{Z}_{i,t}\\;=\\;\\frac{\\operatorname{rank}_{j\\in\\mathcal{U}_t}\\!\\left(\\tilde Z_{j,t}\\right)-1}{\\left|\\mathcal{U}_t\\right|-1}\\ -\\ \\tfrac12 \\ \\in[-\\tfrac12,\\tfrac12]\n$$\n\n**Step 6 \u2014 Conditioning weight.** The reversal is amplified where the move was one-sided (high $A$), where price impact is high (high $\\rho^{ILL}$), and where the recent range is elevated relative to its own norm. Define the range-expansion term\n$$\nE_{i,t}\\;=\\;\\frac{P_{i,t}/N_{rev}}{\\overline{TR}_{i,t}+\\varepsilon},\\qquad\n\\rho^{E}_{i,t}\\;=\\;\\frac{\\operatorname{rank}_{j\\in\\mathcal{U}_t}\\!\\left(E_{j,t}\\right)-1}{\\left|\\mathcal{U}_t\\right|-1}\\in[0,1].\n$$\nThe weight is\n$$\nW_{i,t}\\;=\\;\\frac{A_{i,t}+\\rho^{ILL}_{i,t}+\\rho^{E}_{i,t}}{3}\\ \\in[0,1].\n$$\n\n**Step 7 \u2014 Raw alpha (reversal sign).**\n$$\nS^{raw}_{i,t} \\;=\\; -\\,\\rho^{Z}_{i,t}\\;\\cdot\\; W_{i,t}\n$$\n\n**Step 8 \u2014 Universe eligibility.** Let $\\overline{DV}_{i,t}=\\frac{1}{N_{dvol}}\\sum_{k=0}^{N_{dvol}-1}DV_{i,t-k}$ (min $\\lceil min\\_frac\\cdot N_{dvol}\\rceil$ observations). Symbol $i$ is eligible on date $t$ iff all of $D, \\sigma, A, ILL, \\overline{TR}, \\overline{DV}$ are defined and\n$$\n\\overline{DV}_{i,t}\\;>\\;Q_{dvol\\_pct}\\!\\left(\\left\\{\\overline{DV}_{j,t}\\right\\}_{j}\\right),\n$$\nwhere $Q_p(\\cdot)$ is the cross-sectional $p$-quantile. Ineligible symbol-dates receive a missing score (no position). All cross-sectional ranks in Steps 4\u20136 are computed over the eligible set $\\mathcal{U}_t$ only. If $|\\mathcal{U}_t| < min\\_names$, all scores on date $t$ are missing.\n\n**Step 9 \u2014 Temporal smoothing and neutralisation.**\n$$\nS^{sm}_{i,t}\\;=\\;\\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} S^{raw}_{i,t-k}\n$$\ncomputed over available (non-missing) values with a minimum of $1$ observation; days on which $S^{raw}$ is missing contribute nothing and the mean is taken over the non-missing subset of the window.\n\nFinal cross-sectionally demeaned and unit-gross-scaled signal:\n$$\n\\alpha_{i,t}\\;=\\;\\frac{S^{sm}_{i,t}-\\operatorname{mean}_{j\\in\\mathcal{U}_t}\\!\\left(S^{sm}_{j,t}\\right)}{\\sum_{j\\in\\mathcal{U}_t}\\left|S^{sm}_{j,t}-\\operatorname{mean}_{k\\in\\mathcal{U}_t}\\!\\left(S^{sm}_{k,t}\\right)\\right|+\\varepsilon}\n$$\n\n**Undefined-value handling (explicit).** (i) Rolling statistics require at least $\\lceil min\\_frac\\cdot N\\rceil$ non-missing observations in their window, otherwise they are missing. (ii) All divisions add $\\varepsilon = eps$ to the denominator; no other division-by-zero handling is applied. (iii) Missing inputs propagate to missing scores; missing scores are never imputed with zero and simply imply no position. (iv) $Z$ is clipped at $\\pm winsor\\_z$; no other clipping is performed. (v) Cross-sections with fewer than $min\\_names$ eligible symbols are dropped entirely. (vi) $TR_{i,t}$ is undefined on a symbol's first observation (no prior close) and is treated as missing.\n\n# Section 3: Causal Rationale\n\nA multi-day price displacement that is achieved with little offsetting intraday churn \u2014 measured by the ratio of the absolute sum of close-minus-open moves to the total true-range path travelled \u2014 is the OHLCV fingerprint of a market that has been clearing one-sided demand for immediacy rather than repricing to new information, since genuine information typically triggers two-sided trading and a rapid new equilibrium. Liquidity suppliers who absorb that one-sided pressure require compensation, and the price concession they extract is mechanically larger where the price impact per dollar traded is larger; the Amihud ratio of absolute return to dollar volume is the direct OHLCV proxy for that impact coefficient. The concession is transitory by construction \u2014 it exists to induce inventory absorption, and it decays as inventory is redistributed \u2014 so the displacement should partially retrace over the following days, motivating a signal that is short recent winners and long recent losers. Scaling the displacement by trailing realised volatility ensures the ranking compares moves in standard-deviation units rather than raw percentage terms, so the signal is not simply a bet on high-volatility names, while the range-expansion term restricts attention to episodes where the recent trading range is wide relative to the stock's own norm, the regime in which immediacy is most expensive. Excluding the least-traded names by average dollar volume keeps the illiquidity conditioning from degenerating into a bet on names where the retracement cannot realistically be captured.\n\n# Section 4: Structural Bounds\n\n- **Data:** Uses exclusively point-in-time daily OHLCV and daily returns. No fundamentals, no analyst data, no index membership, no corporate-action or restatement-sensitive fields. All inputs are as-reported on the trade date; the construction assumes prices and volumes are split/dividend-adjusted consistently through the sample in a manner known at date $t$.\n- **Execution timing (fixed rule):** The signal for date $t$ uses only data observable up to and including the market close of day $t$, and the resulting portfolio is executed at the **OPEN of day $t+1$**. Every term in Section 2 is a function of $\\{O,H,L,C,V,r\\}$ at indices $\\le t$; no term references any quantity dated $t+1$ or later. The formulation therefore complies. The implementation in Section 5 returns the signal aligned to date $t$ and does **not** apply the one-day execution lag; the backtest harness applies it.\n- **Minimum trailing observations:** The binding constraint is the longest window with its minimum-fraction requirement, $\\max(N_{vol}, N_{amihud}, N_{range}, N_{dvol}) = 20$ with $min\\_frac = 0.8 \\Rightarrow 16$ observations, plus one extra day for the lagged close used in $TR$ and in the open-to-close normalisation. Therefore **a symbol requires at least 17 trailing daily bars** for the raw score to be defined, and the smoothed final signal is defined from that same day onward (smoothing uses a minimum of 1 observation). A conservative burn-in of **21 bars** is recommended.\n- **Cross-sectional requirement:** At least `min_names = 20` eligible symbols must exist on a date; otherwise no signal is produced for that date.\n- **Other bounds:** The signal is cross-sectionally demeaned and scaled to unit gross exposure, so it is dollar-neutral by construction but carries no explicit beta, sector, or size neutralisation. It is a high-turnover construct (nominal 5-day horizon with daily rebalancing and 3-day smoothing) and is tilted by construction toward higher-impact names, so realised capacity is limited; no transaction-cost model is embedded in the signal.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_rev=5,\n                   N_vol=20,\n                   N_amihud=20,\n                   N_range=20,\n                   N_dvol=20,\n                   N_smooth=3,\n                   min_frac=0.8,\n                   winsor_z=3.0,\n                   eps=1e-12,\n                   min_names=20,\n                   dvol_pct=0.20):\n\n    data = df.sort_index()\n\n    g = data.groupby(level='symbol')\n\n    mp_rev = int(np.ceil(min_frac * N_rev))\n    mp_vol = int(np.ceil(min_frac * N_vol))\n    mp_amh = int(np.ceil(min_frac * N_amihud))\n    mp_rng = int(np.ceil(min_frac * N_range))\n    mp_dvl = int(np.ceil(min_frac * N_dvol))\n\n    ret = data['returns']\n    close = data['close']\n    open_ = data['open']\n    high = data['high']\n    low = data['low']\n    volume = data['volume']\n\n    prev_close = g['close'].shift(1)\n\n    # Step 1: cumulative displacement\n    D = ret.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum() \\\n           .reset_index(level=0, drop=True).reindex(data.index)\n\n    # Step 2: realised volatility and normalised displacement\n    sigma = ret.groupby(level='symbol').rolling(N_vol, min_periods=mp_vol).std(ddof=1) \\\n               .reset_index(level=0, drop=True).reindex(data.index)\n    Z = D / (np.sqrt(N_rev) * sigma + eps)\n    Z_w = Z.clip(lower=-winsor_z, upper=winsor_z)\n\n    # Step 3: true range and absorption ratio\n    tr_num = np.maximum(high, prev_close) - np.minimum(low, prev_close)\n    TR = tr_num / (prev_close + eps)\n\n    TR_avg = TR.groupby(level='symbol').rolling(N_range, min_periods=mp_rng).mean() \\\n               .reset_index(level=0, drop=True).reindex(data.index)\n    P = TR.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum() \\\n          .reset_index(level=0, drop=True).reindex(data.index)\n\n    co = (close - open_) / (prev_close + eps)\n    co_sum = co.groupby(level='symbol').rolling(N_rev, min_periods=mp_rev).sum() \\\n               .reset_index(level=0, drop=True).reindex(data.index)\n    A = co_sum.abs() / (P + eps)\n\n    # Step 4: Amihud illiquidity\n    dv = close * volume\n    amh_daily = ret.abs() / (dv + eps)\n    ILL = amh_daily.groupby(level='symbol').rolling(N_amihud, min_periods=mp_amh).mean() \\\n                   .reset_index(level=0, drop=True).reindex(data.index)\n\n    # Step 6 input: range expansion\n    E = (P / N_rev) / (TR_avg + eps)\n\n    # Step 8: eligibility\n    DV_avg = dv.groupby(level='symbol').rolling(N_dvol, min_periods=mp_dvl).mean() \\\n               .reset_index(level=0, drop=True).reindex(data.index)\n\n    defined = (D.notna() & sigma.notna() & A.notna() & ILL.notna()\n               & TR_avg.notna() & E.notna() & DV_avg.notna() & Z_w.notna())\n\n    dv_thresh = DV_avg.where(defined).groupby(level='date').transform(\n        lambda s: s.quantile(dvol_pct))\n    eligible = defined & (DV_avg > dv_thresh)\n\n    n_elig = eligible.groupby(level='date').transform('sum')\n    eligible = eligible & (n_elig >= min_names)\n\n    Zm = Z_w.where(eligible)\n    ILLm = ILL.where(eligible)\n    Em = E.where(eligible)\n    Am = A.where(eligible)\n\n    cnt = eligible.groupby(level='date').transform('sum')\n    denom_rank = (cnt - 1.0).replace(0.0, np.nan)\n\n    rho_Z = (Zm.groupby(level='date').rank(method='average') - 1.0) / denom_rank - 0.5\n    rho_ILL = (ILLm.groupby(level='date').rank(method='average') - 1.0) / denom_rank\n    rho_E = (Em.groupby(level='date').rank(method='average') - 1.0) / denom_rank\n\n    W = (Am + rho_ILL + rho_E) / 3.0\n\n    S_raw = -rho_Z * W\n\n    # Step 9: temporal smoothing over available values, then demean and gross-scale\n    S_sm = S_raw.groupby(level='symbol').rolling(N_smooth, min_periods=1).mean() \\\n                .reset_index(level=0, drop=True).reindex(data.index)\n    S_sm = S_sm.where(eligible)\n\n    demeaned = S_sm - S_sm.groupby(level='date').transform('mean')\n    gross = demeaned.abs().groupby(level='date').transform('sum')\n    alpha = demeaned / (gross + eps)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha_isiar'\n    return alpha\n```",
+    "response_sha256": "648a9049339db2bda1849a1338e41a9640a04a4a5680e8a20a84fc6b0a2c56c1",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_vol",
+            "N_amihud",
+            "N_range",
+            "N_dvol",
+            "N_smooth",
+            "min_frac",
+            "winsor_z",
+            "eps",
+            "min_names",
+            "dvol_pct"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1627,
+            "output_tokens": 6886,
+            "total_tokens": 8513
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_6a1a6f8d",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1155802903,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_smooth",
+            "eps_price",
+            "eps_vol",
+            "eps_cs"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-25T08:31:45.799516+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 4,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volume-Shock Intraday Momentum (VSIM)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_vol = 20`: Lookback window in days for calculating rolling mean and standard deviation of daily volume.\n  - `N_smooth = 5`: Lookback window in days for smoothing the volume-weighted intraday intensity.\n  - `eps_price = 1e-8`: Small positive constant to prevent division by zero during intraday price range normalization.\n  - `eps_vol = 1e-8`: Small positive constant to prevent division by zero during volume z-score calculation.\n  - `eps_cs = 1e-8`: Small positive constant to prevent division by zero during cross-sectional standardization.\n- Required Inputs: `open`, `high`, `low`, `close`, `volume`\n\n# Section 2: Mathematical Formulation\n\nThe calculation of the signal for asset $i$ on date $t$ follows five sequential steps:\n\n1. **Intraday Relative Position ($I_{i,t}$):**\n   $$I_{i,t} = \\frac{C_{i,t} - O_{i,t}}{(H_{i,t} - L_{i,t}) + \\text{eps\\_price}}$$\n   where $C_{i,t}$, $O_{i,t}$, $H_{i,t}$, and $L_{i,t}$ represent the Close, Open, High, and Low prices for asset $i$ on date $t$.\n\n2. **Volume Z-Score ($Z_{V, i,t}$):**\n   $$\\mu_{V, i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} V_{i,t-k}$$\n   $$\\sigma_{V, i,t} = \\sqrt{\\frac{1}{N_{vol}-1} \\sum_{k=0}^{N_{vol}-1} \\left(V_{i,t-k} - \\mu_{V, i,t}\\right)^2}$$\n   $$Z_{V, i,t} = \\frac{V_{i,t} - \\mu_{V, i,t}}{\\sigma_{V, i,t} + \\text{eps\\_vol}}$$\n   where $V_{i,t}$ is the trading volume of asset $i$ on date $t$.\n\n3. **Volume-Weighted Intraday Intensity ($W_{i,t}$):**\n   $$W_{i,t} = I_{i,t} \\cdot Z_{V, i,t}$$\n\n4. **Time-Series Smoothed Signal ($S_{i,t}$):**\n   $$S_{i,t} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} W_{i,t-k}$$\n\n5. **Cross-Sectional Standardization ($\\alpha_{i,t}$):**\n   $$\\mu_{CS, t} = \\frac{1}{M_t} \\sum_{j=1}^{M_t} S_{j,t}$$\n   $$\\sigma_{CS, t} = \\sqrt{\\frac{1}{M_t - 1} \\sum_{j=1}^{M_t} \\left(S_{j,t} - \\mu_{CS, t}\\right)^2}$$\n   $$\\alpha_{i,t} = \\frac{S_{i,t} - \\mu_{CS, t}}{\\sigma_{CS, t} + \\text{eps\\_cs}}$$\n   where $M_t$ is the count of assets with defined values of $S_{j,t}$ on date $t$.\n\n**Handling of Undefined Values:**\n- Rolling operations for $Z_{V,i,t}$ require a minimum observation count of $N_{vol}$ valid trailing daily bars.\n- Rolling operations for $S_{i,t}$ require a minimum observation count of $N_{smooth}$ valid trailing daily values of $W_{i,t}$.\n- If fewer than the required observations exist for a symbol, the intermediate and final values evaluate to NaN.\n- Potential division by zero in range, standard deviation, or cross-sectional standardization is handled by adding explicit epsilon parameters (`eps_price`, `eps_vol`, `eps_cs`).\n- Missing cross-sectional records remain NaN and do not receive signal values.\n\n# Section 3: Causal Rationale\n\nAbnormally high daily trading volume relative to historical levels serves as an observable proxy for institutional liquidity demand and aggressive order flow. When a positive volume shock accompanies a close near the intraday high ($I_{i,t} > 0$), it indicates aggressive buying pressure that absorbs available liquidity and creates upward price momentum. Conversely, a positive volume shock coinciding with a close near the intraday low ($I_{i,t} < 0$) indicates persistent selling pressure and distribution. By weighting intraday price locations by volume z-scores and smoothing over a multi-day window ($N_{smooth}$), the alpha isolates directional liquidity shocks from routine noise while cross-sectional standardization normalizes signal magnitudes across market regimes.\n\n# Section 4: Structural Bounds\n\n- **Data Integrity:** The alpha relies strictly on Point-in-Time (PIT) daily OHLCV market data without forward look-ahead bias.\n- **Execution Timing:** The signal $\\alpha_{i,t}$ is generated using data available up to and including the market close on day $t$. Execution occurs at the OPEN of day $t+1$. The mathematical formulation and Python implementation output values aligned to date $t$ without applying explicit execution lags.\n- **Minimum Trailing Observations:** A minimum of $N_{vol} + N_{smooth} - 1 = 20 + 5 - 1 = 24$ trailing daily observations per symbol are required before the signal is defined.\n\n# Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\n\ndef generate_alpha(\n    df, N_vol=20, N_smooth=5, eps_price=1e-8, eps_vol=1e-8, eps_cs=1e-8\n):\n    # Step 1: Intraday relative position\n    intraday_pos = (df[\"close\"] - df[\"open\"]) / (\n        (df[\"high\"] - df[\"low\"]) + eps_price\n    )\n\n    # Step 2: Rolling volume statistics and z-score per symbol\n    vol_mean = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n    vol_std = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n    vol_zscore = (df[\"volume\"] - vol_mean) / (vol_std + eps_vol)\n\n    # Step 3: Volume-weighted intraday intensity\n    weighted_intensity = intraday_pos * vol_zscore\n\n    # Step 4: Time-series smoothing per symbol\n    smoothed_signal = weighted_intensity.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    # Step 5: Cross-sectional standardization per date\n    cs_mean = smoothed_signal.groupby(level=\"date\").transform(\"mean\")\n    cs_std = smoothed_signal.groupby(level=\"date\").transform(\"std\")\n\n    alpha = (smoothed_signal - cs_mean) / (cs_std + eps_cs)\n\n    return alpha\n```",
+    "response_sha256": "6cddbce0cb090f0196999c80eda0da31531368be61902104cbc6f54fd1970891",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_smooth",
+            "eps_price",
+            "eps_vol",
+            "eps_cs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1155802903,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1030,
+            "output_tokens": 1713,
+            "total_tokens": 9236
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

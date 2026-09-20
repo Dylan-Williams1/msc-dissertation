@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_fc30ce60",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "M_beta",
+            "N_market_min",
+            "N_cs_min",
+            "D_cs",
+            "epsilon_var",
+            "epsilon_cs"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-21T00:26:13.451038+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 21,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1178233595,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "```python\n# Section 1: Alpha Specification\n# Formula Name: Beta-Scaled Common-Shock Reversal\n# Holding Period: 1 trading day\n# Orientation: Long/Short\n# Parameters:\n#   N_beta = 60: trailing window, in symbol observations, for beta estimation\n#   M_beta = 40: minimum valid paired observations required in the beta window\n#   N_market_min = 2: minimum non-missing symbol returns required for the market return\n#   N_cs_min = 2: minimum valid raw signals required for cross-sectional standardization\n#   D_cs = 0: degrees of freedom used in the cross-sectional standard deviation\n#   epsilon_var = 1e-12: lower bound for a valid market-return variance\n#   epsilon_cs = 1e-12: lower bound for a valid cross-sectional standard deviation\n# Required Inputs: returns\n#\n# Section 2: Mathematical Formulation\n# Let r_{i,t} denote the supplied daily return of symbol i on date t. Let U_t be\n# the symbols with non-missing returns on t, and let n_t = |U_t|. Define the\n# equal-weighted market return by\n#   m_t = (1 / n_t) \\sum_{j \\in U_t} r_{j,t}\n# when n_t >= N_market_min; otherwise m_t is undefined.\n#\n# For symbol i, define paired observations x_{i,s} = r_{i,s} and y_{i,s} = m_s\n# only where both values are non-missing. Let W_{i,t} be the valid paired\n# observations among the latest N_beta rows for symbol i. Beta is defined only\n# when |W_{i,t}| >= M_beta:\n#   \\bar{x}_{i,t} = (1 / |W_{i,t}|) \\sum_{s \\in W_{i,t}} x_{i,s},\n#   \\bar{y}_{i,t} = (1 / |W_{i,t}|) \\sum_{s \\in W_{i,t}} y_{i,s},\n#   C_{i,t} = (1 / |W_{i,t}|) \\sum_{s \\in W_{i,t}} x_{i,s}y_{i,s}\n#             - \\bar{x}_{i,t}\\bar{y}_{i,t},\n#   V_{i,t} = (1 / |W_{i,t}|) \\sum_{s \\in W_{i,t}} y_{i,s}^{2}\n#             - \\bar{y}_{i,t}^{2},\n#   \\beta_{i,t} = C_{i,t} / V_{i,t}.\n# If V_{i,t} <= epsilon_var, beta is undefined.\n#\n# The raw beta-scaled reversal signal is\n#   q_{i,t} = -\\beta_{i,t}m_t.\n# On each date, let A_t contain symbols with defined q_{i,t}, and K_t = |A_t|.\n# When K_t >= N_cs_min, define\n#   \\mu_{q,t} = (1 / K_t) \\sum_{i \\in A_t} q_{i,t},\n#   \\sigma_{q,t} =\n#       \\sqrt{(1 / (K_t - D_cs)) \\sum_{i \\in A_t}(q_{i,t}-\\mu_{q,t})^2},\n#   \\alpha_{i,t} = (q_{i,t}-\\mu_{q,t}) / \\sigma_{q,t}.\n# If \\sigma_{q,t} <= epsilon_cs, the signal is undefined.\n#\n# Rolling calculations exclude missing paired observations and require M_beta\n# valid pairs. Missing cross-sectional observations are excluded from means,\n# counts, and standard deviations. Undefined intermediate values remain missing;\n# there is no imputation or clipping and no special replacement of infinities.\n# Missing open, high, low, close, or volume values have no effect because those\n# fields are not used.\n#\n# Section 3: Causal Rationale\n# The equal-weighted market return is an OHLCV-derived proxy for a common daily\n# price shock across the available equity universe.\n# Rolling beta measures each symbol's observable return sensitivity to that shock.\n# If part of a large common move represents short-lived market-wide price pressure,\n# proxied specifically by the signed market return, its beta-proportional component\n# may partially reverse over the next trading day.\n# The signal therefore opposes the current common move while scaling each\n# symbol's exposure by its estimated beta.\n#\n# Section 4: Structural Bounds\n# The strategy relies solely on Point-in-Time daily returns contained in the\n# permitted PIT OHLCV dataset; the date-t universe uses only symbols observable\n# on date t. The signal uses information available through the market close on\n# day t and is executed at the OPEN of day t+1, and the formulation complies\n# with this timing rule. The returned signal remains aligned to t because the\n# backtesting harness applies the execution lag. A symbol requires at least\n# M_beta = 40 valid paired observations within its latest N_beta = 60 rows.\n# Its signal also requires at least N_market_min = 2 valid returns for each\n# included market observation and N_cs_min = 2 valid raw signals on date t.\n#\n# Section 5: Python Implementation\nimport pandas as pd\n\ndef generate_alpha(\n    df,\n    N_beta=60,\n    M_beta=40,\n    N_market_min=2,\n    N_cs_min=2,\n    D_cs=0,\n    epsilon_var=1e-12,\n    epsilon_cs=1e-12\n):\n    x = df.sort_index(level=[\"symbol\", \"date\"])\n\n    market_count = (\n        x[\"returns\"]\n        .groupby(level=\"date\")\n        .transform(\"count\")\n    )\n    market_return = (\n        x[\"returns\"]\n        .groupby(level=\"date\")\n        .transform(\"mean\")\n        .where(market_count >= N_market_min)\n    )\n\n    paired = x[\"returns\"].notna() & market_return.notna()\n    symbol_return = x[\"returns\"].where(paired)\n    paired_market = market_return.where(paired)\n\n    mean_symbol = (\n        symbol_return.groupby(level=\"symbol\")\n        .rolling(window=N_beta, min_periods=M_beta)\n        .mean()\n        .droplevel(0)\n    )\n    mean_market = (\n        paired_market.groupby(level=\"symbol\")\n        .rolling(window=N_beta, min_periods=M_beta)\n        .mean()\n        .droplevel(0)\n    )\n    mean_product = (\n        (symbol_return * paired_market)\n        .groupby(level=\"symbol\")\n        .rolling(window=N_beta, min_periods=M_beta)\n        .mean()\n        .droplevel(0)\n    )\n    mean_market_squared = (\n        paired_market.pow(2)\n        .groupby(level=\"symbol\")\n        .rolling(window=N_beta, min_periods=M_beta)\n        .mean()\n        .droplevel(0)\n    )\n\n    covariance = mean_product - mean_symbol * mean_market\n    market_variance = mean_market_squared - mean_market.pow(2)\n    beta = covariance / market_variance.where(market_variance > epsilon_var)\n\n    raw_signal = -beta * market_return\n    cs_count = raw_signal.groupby(level=\"date\").transform(\"count\")\n    cs_mean = raw_signal.groupby(level=\"date\").transform(\"mean\")\n    cs_std = raw_signal.groupby(level=\"date\").transform(\"std\", ddof=D_cs)\n\n    signal = (\n        (raw_signal - cs_mean)\n        / cs_std.where(\n            (cs_count >= N_cs_min)\n            & (cs_std > epsilon_cs)\n        )\n    )\n\n    return signal.reindex(df.index)\n```",
+    "response_sha256": "6df03b84f224081bbfd68472b61f0204ff8983977eda180784ab8081f736e7f0",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "M_beta",
+            "N_market_min",
+            "N_cs_min",
+            "D_cs",
+            "epsilon_var",
+            "epsilon_cs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4582,
+            "total_tokens": 5578
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

@@ -1,0 +1,102 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_de867dae",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "D_vol",
+            "Z_floor",
+            "K_clv"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-21T00:22:17.836661+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 17,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1091097945,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "```python\n# Section 1: Alpha Specification\n# Formula Name: Abnormal-Volume Close-Location Continuation\n# Holding Period: 1 trading day\n# Orientation: Cross-sectional Long/Short\n# Parameters:\n#   N_vol = 20       : trailing volume-normalization window\n#   D_vol = 0        : degrees of freedom used in the rolling volume standard deviation\n#   Z_floor = 0.0    : lower bound applied to the abnormal-volume z-score\n#   K_clv = 2.0      : close-location scaling coefficient\n# Required Inputs: high, low, close, volume\n#\n# Section 2: Mathematical Formulation\n# For symbol i on date t, let V_{i,t}, H_{i,t}, L_{i,t}, and C_{i,t} denote\n# volume, high, low, and close.\n#\n# Using the latest N_vol observations:\n# $\\mu^V_{i,t} = \\frac{1}{N_{\\mathrm{vol}}}\n#                  \\sum_{k=0}^{N_{\\mathrm{vol}}-1} V_{i,t-k}$.\n#\n# $\\sigma^V_{i,t} =\n#   \\sqrt{\\frac{\\sum_{k=0}^{N_{\\mathrm{vol}}-1}\n#   (V_{i,t-k}-\\mu^V_{i,t})^2}{N_{\\mathrm{vol}}-D_{\\mathrm{vol}}}}$.\n#\n# The abnormal-volume score is:\n# $Z^V_{i,t} = (V_{i,t}-\\mu^V_{i,t})/\\sigma^V_{i,t}$.\n#\n# Retain only abnormal volume above the declared floor:\n# $Z^{V,+}_{i,t} = \\max(Z^V_{i,t}, Z_{\\mathrm{floor}})$.\n#\n# The close-location value is:\n# $\\mathrm{CLV}_{i,t} =\n#   [K_{\\mathrm{clv}}C_{i,t}-H_{i,t}-L_{i,t}]/(H_{i,t}-L_{i,t})$.\n#\n# The raw signal is:\n# $Q_{i,t} = Z^{V,+}_{i,t}\\mathrm{CLV}_{i,t}$.\n#\n# Let $R_{i,t}$ be the ascending average-tie rank of $Q_{i,t}$ among valid\n# symbols on date t, and let $n_t$ be the number of valid symbols. Define:\n# $P_{i,t}=R_{i,t}/n_t$ and\n# $\\alpha_{i,t}=P_{i,t}-\\frac{1}{n_t}\\sum_j P_{j,t}$.\n#\n# Rolling statistics require N_vol nonmissing volume values in the\n# N_vol-row window (`min_periods=N_vol`). Missing observations are not\n# imputed, and no synthetic dates are inserted. If the rolling volume\n# standard deviation or the high-low range is zero, the corresponding\n# value is undefined. NaNs remain NaN and are excluded from cross-sectional\n# ranking and averaging. The lower-bound operation preserves NaNs. No\n# separate treatment is applied to infinite input values.\n#\n# Section 3: Causal Rationale\n# Volume above its trailing norm is an OHLCV proxy for unusually intense\n# trading activity. When that activity coincides with a close near the\n# session high or low, the close location provides an observable proxy for\n# the direction in which trading pressure dominated the daily range.\n# Elevated activity near an extreme may require more than one session for\n# available liquidity to absorb, motivating short-horizon continuation.\n# Suppressing below-floor volume scores limits exposure to price locations\n# formed without unusually high trading activity.\n#\n# Section 4: Structural Bounds\n# The strategy relies solely on Point-in-Time daily OHLCV data.\n# The signal for day t uses only data available through the market close\n# on day t and is executed at the OPEN of day t+1; the formulation complies\n# with this timing rule. The function leaves the signal aligned to day t\n# because the backtesting harness applies the execution lag.\n# A symbol requires at least N_vol = 20 trailing observations, including\n# day t, with nonmissing volume throughout that window. Its current high,\n# low, and close must also be valid, its high-low range must be nonzero,\n# and its rolling volume standard deviation must be nonzero.\n# Valid parameter bounds are N_vol > D_vol >= 0 and K_clv > 0.\n#\n# Section 5: Python Implementation\nimport pandas as pd\n\n\ndef generate_alpha(\n    df,\n    N_vol=20,\n    D_vol=0,\n    Z_floor=0.0,\n    K_clv=2.0\n):\n    original_index = df.index\n    work = df.sort_index(level=[\"symbol\", \"date\"])\n\n    volume_grouped = work[\"volume\"].groupby(level=\"symbol\", sort=False)\n\n    volume_mean = (\n        volume_grouped\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .droplevel(0)\n    )\n\n    volume_std = (\n        volume_grouped\n        .rolling(window=N_vol, min_periods=N_vol)\n        .std(ddof=D_vol)\n        .droplevel(0)\n    )\n\n    volume_z = (\n        (work[\"volume\"] - volume_mean)\n        / volume_std.where(volume_std.ne(0))\n    )\n    positive_volume_z = volume_z.clip(lower=Z_floor)\n\n    daily_range = work[\"high\"] - work[\"low\"]\n    close_location = (\n        K_clv * work[\"close\"] - work[\"high\"] - work[\"low\"]\n    ) / daily_range.where(daily_range.ne(0))\n\n    raw_signal = positive_volume_z * close_location\n\n    percentile_rank = raw_signal.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True\n    )\n    cross_sectional_mean = percentile_rank.groupby(level=\"date\").transform(\n        \"mean\"\n    )\n\n    alpha = percentile_rank - cross_sectional_mean\n    alpha = alpha.reindex(original_index)\n    alpha.name = \"abnormal_volume_close_location_continuation\"\n\n    return alpha\n```",
+    "response_sha256": "f5845303b97ca0f6b3453009593295b4b7e331edca9afaf76e64ee1586751d50",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "D_vol",
+            "Z_floor",
+            "K_clv"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 997,
+            "output_tokens": 4356,
+            "total_tokens": 5353
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

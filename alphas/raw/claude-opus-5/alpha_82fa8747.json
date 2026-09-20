@@ -1,0 +1,117 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_82fa8747",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_skip",
+            "N_vol",
+            "N_volu",
+            "N_volu_base",
+            "N_gap",
+            "N_smooth",
+            "w_mom",
+            "w_conf",
+            "w_gap",
+            "eps",
+            "clip_z",
+            "min_obs_frac"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-20T23:30:40.317170+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 1,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 637367744,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed Intermediate Momentum with Gap-Reversal Filter (VCIM)\n- **Holding Period:** 10 trading days (signal recomputed daily; positions turn over gradually)\n- **Orientation:** Long/Short, dollar-neutral cross-sectional\n- **Parameters:**\n  - `N_mom = 126` \u2014 intermediate momentum lookback (total window, in trading days)\n  - `N_skip = 21` \u2014 recent window skipped to avoid short-term reversal\n  - `N_vol = 126` \u2014 daily-return volatility window used to risk-scale the momentum leg\n  - `N_volu = 63` \u2014 volume window used to build the participation-confirmation measure\n  - `N_volu_base = 252` \u2014 long baseline volume window\n  - `N_gap = 21` \u2014 window for the overnight-gap reversal filter\n  - `N_smooth = 5` \u2014 smoothing span (simple moving average) applied to the final composite score\n  - `w_mom = 1.0` \u2014 weight on the risk-adjusted momentum component\n  - `w_conf = 0.35` \u2014 weight on the volume-confirmation component\n  - `w_gap = 0.25` \u2014 weight on the gap-reversal component (subtracted)\n  - `eps = 1e-12` \u2014 numerical floor for denominators\n  - `clip_z = 4.0` \u2014 winsorisation bound applied to cross-sectional z-scores\n  - `min_obs_frac = 0.8` \u2014 minimum fraction of a rolling window that must be non-missing\n- **Required Inputs:** `open`, `high`, `low`, `close`, `volume`, `returns` (daily, point-in-time)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use only data up to and including the close of day $t$.\n\n**Step 1 \u2014 Skipped intermediate momentum (log price change).**\n\n$$\nM_{i,t} \\;=\\; \\ln\\!\\left(\\frac{C_{i,\\,t-N_{skip}}}{C_{i,\\,t-N_{mom}}}\\right)\n$$\n\nwhere $C_{i,t}$ is the close. This requires $N_{mom}+1$ trailing closes and deliberately excludes the most recent $N_{skip}$ days.\n\n**Step 2 \u2014 Risk scaling.**\n\nLet $r_{i,t}$ be the `returns` column (simple daily return). Define\n\n$$\n\\sigma_{i,t} \\;=\\; \\operatorname{stdev}\\big(\\{r_{i,s}\\}_{s=t-N_{vol}+1}^{t}\\big),\\qquad\n\\tilde{M}_{i,t} \\;=\\; \\frac{M_{i,t}}{\\max\\!\\left(\\sigma_{i,t}\\sqrt{N_{mom}-N_{skip}},\\;\\varepsilon\\right)}\n$$\n\nwith $\\varepsilon =$ `eps`. The denominator converts the raw drift into an approximate t-statistic of trend strength, so that low-volatility trends are not mechanically penalised.\n\n**Step 3 \u2014 Volume participation confirmation.**\n\nDefine signed dollar-ish volume flow using the intraday close location within the daily range:\n\n$$\n\\lambda_{i,t} \\;=\\; \\frac{2C_{i,t}-H_{i,t}-L_{i,t}}{\\max(H_{i,t}-L_{i,t},\\;\\varepsilon)} \\;\\in\\;[-1,1]\n$$\n\n$$\nF_{i,t} \\;=\\; \\lambda_{i,t}\\, V_{i,t}\n$$\n\n$$\nK_{i,t} \\;=\\; \\frac{\\sum_{s=t-N_{volu}+1}^{t} F_{i,s}}{\\max\\!\\left(\\sum_{s=t-N_{volu\\_base}+1}^{t} V_{i,s}\\;\\cdot\\; \\tfrac{N_{volu}}{N_{volu\\_base}},\\;\\varepsilon\\right)}\n$$\n\n$K_{i,t}$ is the net range-location-weighted volume accumulated over the recent quarter, normalised by the symbol's typical volume over the same span length, drawn from a one-year baseline. It is dimensionless and bounded in practice by $[-1,1]$.\n\n**Step 4 \u2014 Overnight gap reversal filter.**\n\nDefine the overnight gap log-return and the intraday log-return:\n\n$$\ng_{i,t} \\;=\\; \\ln\\!\\left(\\frac{O_{i,t}}{C_{i,t-1}}\\right),\\qquad\nG_{i,t} \\;=\\; \\sum_{s=t-N_{gap}+1}^{t} g_{i,s}\n$$\n\n$G_{i,t}$ captures the portion of recent price change delivered at the open rather than through continuous trading.\n\n**Step 5 \u2014 Cross-sectional standardisation.**\n\nFor any raw quantity $X_{i,t}$, define the winsorised cross-sectional z-score over the set $\\mathcal{S}_t$ of symbols with a defined value on date $t$:\n\n$$\nz(X)_{i,t} \\;=\\; \\operatorname{clip}\\!\\left(\\frac{X_{i,t}-\\mu_t(X)}{\\max(s_t(X),\\;\\varepsilon)},\\;-c,\\;+c\\right),\\qquad c=\\texttt{clip\\_z}\n$$\n\nwith $\\mu_t$ and $s_t$ the cross-sectional mean and (population-consistent, ddof $=1$) standard deviation over $\\mathcal{S}_t$.\n\n**Step 6 \u2014 Composite score.**\n\n$$\nS_{i,t} \\;=\\; w_{mom}\\, z(\\tilde{M})_{i,t} \\;+\\; w_{conf}\\, z(K)_{i,t} \\;-\\; w_{gap}\\, z(G)_{i,t}\n$$\n\n**Step 7 \u2014 Temporal smoothing and final re-standardisation.**\n\n$$\n\\bar{S}_{i,t} \\;=\\; \\frac{1}{N_{smooth}}\\sum_{s=t-N_{smooth}+1}^{t} S_{i,s},\n\\qquad\nA_{i,t} \\;=\\; z(\\bar{S})_{i,t}\n$$\n\n$A_{i,t}$ is the alpha score at the close of day $t$. Positive $\\Rightarrow$ long, negative $\\Rightarrow$ short.\n\n**Handling of undefined values (explicit).**\n\n- Rolling windows in Steps 2, 3, 4 and 7 require at least $\\lceil$ `min_obs_frac` $\\times$ window $\\rceil$ non-missing observations; otherwise the output is missing (NaN).\n- Step 1 requires both $C_{i,t-N_{skip}}$ and $C_{i,t-N_{mom}}$ to exist and be strictly positive; otherwise $M_{i,t}$ is NaN.\n- All divisions use $\\max(\\cdot,\\varepsilon)$ on the denominator, so division by zero cannot occur. Where a denominator could legitimately be negative (it cannot in Steps 2\u20133, as all are sums of non-negative volumes or standard deviations), no sign inversion arises.\n- Non-finite results ($\\pm\\infty$) arising from logs of non-positive prices are set to NaN before cross-sectional standardisation.\n- In Step 5, symbols with NaN input are excluded from $\\mu_t$ and $s_t$ and receive NaN output. In Step 6, if any of the three z-scores is NaN for a symbol on date $t$, $S_{i,t}$ is NaN for that symbol (no partial-component imputation).\n- No other imputation, filling, or clipping is performed.\n\n# Section 3: Causal Rationale\n\nPrices adjust slowly to gradually diffusing information, so a firm's trend measured over the prior six months (excluding the most recent month, which is contaminated by bid\u2013ask bounce and short-horizon liquidity reversal) tends to persist; scaling that drift by realised return volatility isolates trend *reliability* rather than trend *magnitude*, preventing the score from simply selecting high-beta names. The volume-confirmation term uses the observable close-within-daily-range location weighted by traded volume, which is a purely OHLCV proxy for whether price advances have been accompanied by sustained transaction activity rather than thin drift; trends supported by volume are less likely to be liquidity artefacts and hence more likely to continue. The gap term subtracts the fraction of recent movement that arrived overnight, when continuous price discovery is absent: overnight jumps are disproportionately news- and auction-driven, are more prone to short-horizon overshoot, and therefore represent a lower-quality contribution to a momentum signal than intraday-accumulated movement. Cross-sectional z-scoring makes the alpha a relative-ranking, dollar-neutral statement, so it expresses the persistence of *relative* strength rather than market direction. Temporal smoothing over a week reduces day-to-day signal noise and turnover, matching the multi-week horizon at which the underslow-diffusion mechanism is expected to operate.\n\n# Section 4: Structural Bounds\n\n- **Data:** Strictly point-in-time daily OHLCV plus the derived `returns` column. No fundamentals, no analyst data, no index membership, no corporate-action-conditioned data. Prices are assumed split- and dividend-adjusted as of date $t$ only using information available at $t$.\n- **Execution timing (fixed):** The signal $A_{i,t}$ is computed from data available up to and including the market close of day $t$, and the resulting target position is executed at the **OPEN of day $t+1$**. The formulation complies: every rolling window terminates at index $t$, and no negative shifts, forward fills across dates, or centred windows are used. The Python function returns the series aligned to date $t$; the one-day execution lag is applied by the backtest harness, not inside the function.\n- **Minimum trailing observations:** The binding constraint is the longer of the momentum window and the volume baseline. Formally $\\max(N_{mom}+1,\\; N_{volu\\_base},\\; N_{vol},\\; N_{volu},\\; N_{gap}+1) = 252$ trailing daily observations, plus $N_{smooth}-1 = 4$ additional days for the smoothing step to be fully populated. Therefore **256 trailing observations** are required for a fully defined signal; with `min_obs_frac = 0.8` the volume baseline component becomes defined earlier, but the Step 1 momentum term hard-requires 127 observations and Step 3 requires $\\lceil 0.8 \\times 252 \\rceil = 202$, so the practical minimum is **206 observations**.\n- **Cross-sectional requirement:** At least 2 symbols with defined values on a given date are required for the z-score denominator to be defined; in practice a universe of several hundred names is assumed.\n- **Capacity/liquidity:** Not modelled here; the signal is a raw score, not a position size.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_mom=126,\n                   N_skip=21,\n                   N_vol=126,\n                   N_volu=63,\n                   N_volu_base=252,\n                   N_gap=21,\n                   N_smooth=5,\n                   w_mom=1.0,\n                   w_conf=0.35,\n                   w_gap=0.25,\n                   eps=1e-12,\n                   clip_z=4.0,\n                   min_obs_frac=0.8):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    close = data['close']\n    open_ = data['open']\n    high = data['high']\n    low = data['low']\n    vol = data['volume']\n    ret = data['returns']\n\n    # ---- Step 1: skipped intermediate momentum ----\n    log_close = np.log(close.where(close > 0))\n    lc_skip = log_close.groupby(level='symbol').shift(N_skip)\n    lc_mom = log_close.groupby(level='symbol').shift(N_mom)\n    M = lc_skip - lc_mom\n\n    # ---- Step 2: risk scaling ----\n    mp_vol = int(np.ceil(min_obs_frac * N_vol))\n    sigma = g['returns'].transform(\n        lambda s: s.rolling(N_vol, min_periods=mp_vol).std(ddof=1))\n    denom_mom = np.maximum(sigma * np.sqrt(N_mom - N_skip), eps)\n    M_tilde = M / denom_mom\n\n    # ---- Step 3: volume participation confirmation ----\n    rng = np.maximum(high - low, eps)\n    lam = (2.0 * close - high - low) / rng\n    F = lam * vol\n\n    mp_volu = int(np.ceil(min_obs_frac * N_volu))\n    mp_base = int(np.ceil(min_obs_frac * N_volu_base))\n\n    F_sum = F.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_volu, min_periods=mp_volu).sum())\n    V_base = vol.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_volu_base, min_periods=mp_base).mean())\n    K = F_sum / np.maximum(V_base * N_volu, eps)\n\n    # ---- Step 4: overnight gap reversal filter ----\n    prev_close = g['close'].shift(1)\n    gap = np.log(open_.where(open_ > 0)) - np.log(prev_close.where(prev_close > 0))\n    mp_gap = int(np.ceil(min_obs_frac * N_gap))\n    G = gap.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_gap, min_periods=mp_gap).sum())\n\n    # ---- non-finite -> NaN ----\n    raw = pd.DataFrame({'M_tilde': M_tilde, 'K': K, 'G': G}, index=data.index)\n    raw = raw.replace([np.inf, -np.inf], np.nan)\n\n    # ---- Step 5: cross-sectional winsorised z-scores ----\n    def _xs_z(col):\n        grp = col.groupby(level='date')\n        mu = grp.transform('mean')\n        sd = grp.transform(lambda s: s.std(ddof=1))\n        z = (col - mu) / np.maximum(sd, eps)\n        return z.clip(lower=-clip_z, upper=clip_z)\n\n    z_mom = _xs_z(raw['M_tilde'])\n    z_conf = _xs_z(raw['K'])\n    z_gap = _xs_z(raw['G'])\n\n    # ---- Step 6: composite ----\n    S = w_mom * z_mom + w_conf * z_conf - w_gap * z_gap\n\n    # ---- Step 7: smoothing and final standardisation ----\n    mp_sm = int(np.ceil(min_obs_frac * N_smooth))\n    S_bar = S.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_smooth, min_periods=mp_sm).mean())\n    S_bar = S_bar.replace([np.inf, -np.inf], np.nan)\n\n    alpha = _xs_z(S_bar)\n    alpha.name = 'alpha'\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "debe2fbccb19bbd3c7f140093cad94793c62d57004234da4bddd2f09c58fd365",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_skip",
+            "N_vol",
+            "N_volu",
+            "N_volu_base",
+            "N_gap",
+            "N_smooth",
+            "w_mom",
+            "w_conf",
+            "w_gap",
+            "eps",
+            "clip_z",
+            "min_obs_frac"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1624,
+            "output_tokens": 5203,
+            "total_tokens": 6827
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

@@ -1,0 +1,78 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_97aeb2d8",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 541482006,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_short_vol",
+            "N_long_vol"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-25T08:36:36.491219+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 8,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volume-Confirmed 52-Week High Proximity (VC-52H)\n- Holding Period: 5 days\n- Orientation: Long/Short (Dollar-neutral, zero-mean z-score signal)\n- Parameters:\n  - `N_high = 252`: Lookback window in trading days for calculating the 52-week rolling maximum high.\n  - `N_short_vol = 5`: Short-term rolling window in trading days for recent volume averaging.\n  - `N_long_vol = 60`: Baseline rolling window in trading days for medium-term volume averaging.\n- Required Inputs: `close`, `high`, `volume`\n\n# Section 2: Mathematical Formulation\n\nFor stock $i$ on date $t$:\n\n1. Rolling Maximum High Price ($H_{i,t}$):\n$$H_{i,t} = \\max_{k \\in [0, N_{high}-1]} High_{i, t-k}$$\n\n2. 52-Week High Proximity Ratio ($PR_{i,t}$):\n$$PR_{i,t} = \\frac{Close_{i,t}}{H_{i,t}}$$\n\n3. Short-Term Volume Average ($V_{i,t}^{short}$):\n$$V_{i,t}^{short} = \\frac{1}{N_{short\\_vol}} \\sum_{k=0}^{N_{short\\_vol}-1} Volume_{i, t-k}$$\n\n4. Long-Term Baseline Volume Average ($V_{i,t}^{long}$):\n$$V_{i,t}^{long} = \\frac{1}{N_{long\\_vol}} \\sum_{k=0}^{N_{long\\_vol}-1} Volume_{i, t-k}$$\n\n5. Relative Volume Expansion Ratio ($VR_{i,t}$):\n$$VR_{i,t} = \\frac{V_{i,t}^{short}}{V_{i,t}^{long}}$$\n\n6. Raw Signal ($S_{i,t}$):\n$$S_{i,t} = PR_{i,t} \\times VR_{i,t}$$\n\n7. Cross-Sectional Z-Score ($Alpha_{i,t}$):\nLet $M_t$ denote the set of symbols with valid, non-missing $S_{i,t}$ on date $t$, and $|M_t|$ its size.\n$$\\mu_t = \\frac{1}{|M_t|} \\sum_{i \\in M_t} S_{i,t}$$\n$$\\sigma_t = \\sqrt{\\frac{1}{|M_t| - 1} \\sum_{i \\in M_t} (S_{i,t} - \\mu_t)^2}$$\n$$Alpha_{i,t} = \\frac{S_{i,t} - \\mu_t}{\\sigma_t}$$\n\nHandling of Undefined Values and Missing Observations:\n- Minimum Observation Counts: $H_{i,t}$ requires $N_{high}$ trailing non-missing observations. $V_{i,t}^{short}$ requires $N_{short\\_vol}$ observations, and $V_{i,t}^{long}$ requires $N_{long\\_vol}$ observations.\n- Division by Zero: If $V_{i,t}^{long} = 0$, $VR_{i,t}$ is set to undefined ($\\text{NaN}$). If $\\sigma_t = 0$, $Alpha_{i,t}$ is set to $0.0$ for all $i \\in M_t$.\n- Missing Observations: If any input variable is missing or standard rolling window constraints are unmet, intermediate outputs yield $\\text{NaN}$. Symbols with $\\text{NaN}$ values are omitted pairwise from cross-sectional mean ($\\mu_t$) and standard deviation ($\\sigma_t$) calculations, returning $\\text{NaN}$ for $Alpha_{i,t}$.\n\n# Section 3: Causal Rationale\n\nThe economic mechanism relies on market underreaction caused by the psychological anchoring bias associated with key price thresholds, specifically the 52-week high. Investors anchored to past 52-week highs frequently view these levels as upper resistance bounds, leading to increased disposition-effect selling pressure as price approaches $H_{i,t}$. When proximity to the 52-week high is combined with volume expansion ($VR_{i,t} > 1$), the high trading volume acts as an observable proxy indicating that overhead resistance from anchored sellers is being actively absorbed by high buying demand. Cross-sectionally standardizing this combined proxy isolates equities undergoing high-conviction breakout momentum, which reliably predicts continued multi-day price continuation.\n\n# Section 4: Structural Bounds\n\n- Point-in-Time Data: All inputs rely strictly on Point-in-Time (PIT) daily OHLCV market data.\n- Execution Timing Rule: The signal $Alpha_{i,t}$ is computed strictly using data available up to and including the market close on day $t$. Execution occurs at the open of day $t+1$. The mathematical formulation adheres strictly to this rule without incorporating forward execution shifts in the returned signal array.\n- Minimum Trailing Window: $N_{high} = 252$ trading days of trailing data are required before the signal is defined for a given symbol.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_high=252, N_short_vol=5, N_long_vol=60):\n    high_max = df.groupby(level=\"symbol\")[\"high\"].transform(\n        lambda x: x.rolling(window=N_high, min_periods=N_high).max()\n    )\n    pr = df[\"close\"] / high_max\n\n    vol_short = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_short_vol, min_periods=N_short_vol).mean()\n    )\n    vol_long = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_long_vol, min_periods=N_long_vol).mean()\n    )\n\n    vol_long_adj = vol_long.replace(0, np.nan)\n    vr = vol_short / vol_long_adj\n\n    raw_signal = pr * vr\n\n    mean_cs = raw_signal.groupby(level=\"date\").transform(\"mean\")\n    std_cs = raw_signal.groupby(level=\"date\").transform(\"std\")\n\n    std_cs_adj = std_cs.replace(0, np.nan)\n    alpha = (raw_signal - mean_cs) / std_cs_adj\n\n    zero_std_mask = (std_cs == 0) & raw_signal.notna()\n    alpha = alpha.mask(zero_std_mask, 0.0)\n\n    return alpha\n```",
+    "response_sha256": "b9dfaac7c83220d911a3c0fd7689e2b76ab962d36b49df49c6819caeb92628cf",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_short_vol",
+            "N_long_vol"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 541482006,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1038,
+            "output_tokens": 1532,
+            "total_tokens": 7662
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

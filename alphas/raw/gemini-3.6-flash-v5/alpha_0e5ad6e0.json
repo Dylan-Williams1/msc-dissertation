@@ -1,0 +1,78 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_0e5ad6e0",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1609573728,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_smooth",
+            "eps"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-24T18:36:56.105162+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 10,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Asymmetric Volatility Mean-Reversion (AVMR)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_vol` = 20 (Lookback window in days for downside and upside realized volatility)\n  - `N_smooth` = 5 (Lookback window in days for exponential/simple smoothing of the asymmetry index)\n  - `eps` = 1e-8 (Epsilon parameter to prevent division by zero)\n- Required Inputs: `returns`\n\n---\n\n# Section 2: Mathematical Formulation\n\n1. **Decompose Daily Returns**:\n   For each symbol $i$ on date $t$, let $r_{i,t}$ denote the daily return from the `returns` series. Decompose the return into negative (downside) and positive (upside) components:\n   $$r_{i,t}^- = \\min(r_{i,t}, 0)$$\n   $$r_{i,t}^+ = \\max(r_{i,t}, 0)$$\n\n2. **Calculate Downside and Upside Realized Semi-Variances**:\n   Compute the trailing $N_{\\text{vol}}$-day rolling sample mean of squared downside and upside returns:\n   $$SV_{i,t}^- = \\frac{1}{N_{\\text{vol}}} \\sum_{k=0}^{N_{\\text{vol}}-1} (r_{i,t-k}^-)^2$$\n   $$SV_{i,t}^+ = \\frac{1}{N_{\\text{vol}}} \\sum_{k=0}^{N_{\\text{vol}}-1} (r_{i,t-k}^+)^2$$\n\n3. **Compute Downside and Upside Volatilities**:\n   $$\\sigma_{i,t}^- = \\sqrt{SV_{i,t}^-}$$\n   $$\\sigma_{i,t}^+ = \\sqrt{SV_{i,t}^+}$$\n\n4. **Compute Volatility Asymmetry Index ($VAI$)**:\n   $$VAI_{i,t} = \\frac{\\sigma_{i,t}^- - \\sigma_{i,t}^+}{\\sigma_{i,t}^- + \\sigma_{i,t}^+ + \\text{eps}}$$\n\n5. **Smooth the Volatility Asymmetry Index ($SVAI$)**:\n   Apply a simple rolling mean over $N_{\\text{smooth}}$ days per symbol:\n   $$SVAI_{i,t} = \\frac{1}{N_{\\text{smooth}}} \\sum_{m=0}^{N_{\\text{smooth}}-1} VAI_{i,t-m}$$\n\n6. **Cross-Sectional Standardization**:\n   For each date $t$, standardize $SVAI_{i,t}$ across all available symbols $M_t$:\n   $$\\mu_t = \\frac{1}{M_t} \\sum_{i=1}^{M_t} SVAI_{i,t}$$\n   $$\\sigma_{\\text{CS}, t} = \\sqrt{\\frac{1}{M_t} \\sum_{i=1}^{M_t} (SVAI_{i,t} - \\mu_t)^2}$$\n   $$Z_{i,t} = \\frac{SVAI_{i,t} - \\mu_t}{\\sigma_{\\text{CS}, t} + \\text{eps}}$$\n\n7. **Final Alpha Signal**:\n   $$\\text{Signal}_{i,t} = - Z_{i,t}$$\n\n**Handling of Undefined Values**:\n- Rolling windows require a minimum observation count of `N_vol` for semi-variance calculations and `N_smooth` for index smoothing. Observations with fewer trailing valid data points output `NaN`.\n- Division by zero is mitigated by adding `eps` to denominators.\n- Any missing observations (`NaN`) in the input return series propagate through time-series operations and are excluded from cross-sectional mean and standard deviation computations. No explicit missing value imputation is performed.\n\n---\n\n# Section 3: Causal Rationale\n\nElevated downside volatility relative to upside volatility over short horizons reflects asymmetrical price drops driven by liquidity shocks, forced liquidation, and stop-loss cascades. Conversely, upside volatility reflects orderly demand absorption across multiple execution cycles. Because downside volatility spikes are frequently intensified by transient market illiquidity rather than permanent fundamental re-ratings, assets exhibiting extreme positive volatility asymmetry ($VAI > 0$) become temporarily oversold. As liquidity providers re-enter the market over subsequent trading sessions, this asymmetric volatility premium mean-reverts. Shorting assets with high relative downside asymmetry and buying assets with strong upside-skewed volatility captures this structural return recovery.\n\n---\n\n# Section 4: Structural Bounds\n\n- **Point-in-Time (PIT) Data**: The formulation relies exclusively on Point-in-Time daily OHLCV and return data.\n- **Execution Timing Rule**: The signal $\\text{Signal}_{i,t}$ is computed using market data available up to the market close on day $t$, and is executed at the market OPEN on day $t+1$. The signal output complies strictly with this requirement.\n- **Minimum Trailing Observations**: A minimum of $N_{\\text{vol}} + N_{\\text{smooth}} - 1 = 20 + 5 - 1 = 24$ consecutive daily observations per symbol are required before the signal produces non-NaN values.\n\n---\n\n# Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\ndef generate_alpha(df, N_vol=20, N_smooth=5, eps=1e-8):\n    returns = df['returns']\n\n    ret_neg_sq = returns.clip(upper=0.0) ** 2\n    ret_pos_sq = returns.clip(lower=0.0) ** 2\n\n    sv_down = ret_neg_sq.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n    sv_up = ret_pos_sq.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n\n    sigma_down = sv_down ** 0.5\n    sigma_up = sv_up ** 0.5\n\n    vai = (sigma_down - sigma_up) / (sigma_down + sigma_up + eps)\n\n    svai = vai.groupby(level='symbol').transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    mean_cs = svai.groupby(level='date').transform('mean')\n    std_cs = svai.groupby(level='date').transform('std')\n\n    signal = -(svai - mean_cs) / (std_cs + eps)\n\n    return signal\n```",
+    "response_sha256": "ec0baf37a91537ffad792e870e5d0564a99e99f648e82ee910d609a5ba54ea43",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_smooth",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1609573728,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1527,
+            "total_tokens": 7488
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

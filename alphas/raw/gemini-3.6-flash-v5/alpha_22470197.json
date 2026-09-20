@@ -1,0 +1,81 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_22470197",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1155802903,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_ret",
+            "N_vol",
+            "N_adv",
+            "N_smooth"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-24T18:29:46.840826+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 4,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volume-Amplified Volatility-Standardized Short-Term Reversal\n- Holding Period: 3 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_ret`: Short-term return lookback window in days (default: 3)\n  - `N_vol`: Rolling daily return volatility lookback window in days (default: 20)\n  - `N_adv`: Rolling average daily volume lookback window in days (default: 20)\n  - `N_smooth`: Time-series moving average smoothing window in days (default: 3)\n- Required Inputs: `returns`, `volume`\n\n# Section 2: Mathematical Formulation\n\nLet $r_{i,t}$ denote the daily return (`returns`) and $V_{i,t}$ denote the daily trading volume (`volume`) for symbol $i$ on day $t$.\n\n1. Short-Term Cumulative Return:\n$$R_{i,t} = \\sum_{k=0}^{N_{ret}-1} r_{i,t-k}$$\n\n2. Rolling Return Volatility:\n$$\\sigma_{i,t} = \\sqrt{\\frac{1}{N_{vol}-1} \\sum_{k=0}^{N_{vol}-1} \\left( r_{i,t-k} - \\bar{r}_{i,t,N_{vol}} \\right)^2}$$\nwhere $\\bar{r}_{i,t,N_{vol}} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} r_{i,t-k}$.\n\n3. Relative Volume Ratio:\n$$\\text{VR}_{i,t} = \\frac{V_{i,t}}{\\frac{1}{N_{adv}} \\sum_{k=0}^{N_{adv}-1} V_{i,t-k}}$$\n\n4. Raw Signal Formulation:\n$$S_{raw, i, t} = -1 \\times \\left( \\frac{R_{i,t}}{\\sigma_{i,t} \\cdot \\sqrt{N_{ret}}} \\right) \\times \\text{VR}_{i,t}$$\n\n5. Cross-Sectional Standardization (Z-Score):\n$$Z_{i,t} = \\frac{S_{raw, i, t} - \\mu_{t}(S_{raw})}{\\sigma_{t}(S_{raw})}$$\nwhere $\\mu_{t}(S_{raw})$ and $\\sigma_{t}(S_{raw})$ are the cross-sectional mean and sample standard deviation across all valid symbols on date $t$.\n\n6. Smoothed Alpha Signal:\n$$\\alpha_{i,t} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} Z_{i,t-k}$$\n\nHandling of Undefined Values:\n- Minimum Observation Count: Rolling cumulative returns require at least `N_ret` trailing valid observations. Rolling volatility requires at least `N_vol` trailing valid observations. Rolling average daily volume requires at least `N_adv` trailing valid observations. Time-series smoothing requires at least 1 valid observation up to `N_smooth`.\n- Division by Zero and Infinities: If $\\sigma_{i,t} = 0$, average daily volume is $0$, or $\\sigma_t(S_{raw}) = 0$, the resulting value is set to undefined (`NaN`). Any calculation yielding positive or negative infinity is replaced with `NaN`.\n- Missing Observations: Cross-sectional mean and standard deviation are calculated excluding `NaN` values. If a symbol has a `NaN` raw signal on day $t$, its resulting $Z_{i,t}$ is set to `NaN`.\n\n# Section 3: Causal Rationale\nShort-term price dislocations driven by temporary liquidity imbalances often experience systematic mean reversion as market makers absorb transient order flow. Normalizing short-term cumulative returns over `N_ret` days by rolling return volatility (`N_vol`) isolates statistically significant price overreactions from baseline asset noise. Multiplying this standardized move by the relative volume ratio acts as an intensity proxy for aggressive order execution, where above-average volume indicates heavy price impact against passive liquidity. Negating this factor establishes long positions in assets experiencing severe downward overreactions on high volume and short positions in assets experiencing sharp upward overreactions on high volume. Finally, applying an `N_smooth`-day time-series moving average mitigates execution turnover by filtering out high-frequency noise while preserving the underlying reversal signal.\n\n# Section 4: Structural Bounds\n- Point-in-Time Data: The model relies exclusively on Point-in-Time (PIT) daily OHLCV market data available up to date $t$.\n- Execution Timing Rule: The signal is generated using data available up to the market close on day $t$, and is executed at the OPEN of day $t+1$. The mathematical formulation complies strictly with this rule as all operations at time step $t$ consume data indexed on or before day $t$.\n- Minimum Trailing Window: A minimum of $\\max(N_{vol}, N_{adv}) = 20$ historical daily observations per symbol is required before the signal produces its first non-null output.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_ret=3, N_vol=20, N_adv=20, N_smooth=3):\n    # 1. Short-term cumulative return\n    cum_ret = df.groupby(level=\"symbol\")[\"returns\"].transform(\n        lambda x: x.rolling(window=N_ret, min_periods=N_ret).sum()\n    )\n\n    # 2. Rolling daily return volatility\n    vol = df.groupby(level=\"symbol\")[\"returns\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n\n    # 3. Rolling average daily volume\n    adv = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_adv, min_periods=N_adv).mean()\n    )\n\n    # 4. Relative volume ratio\n    vol_ratio = df[\"volume\"] / adv\n    vol_ratio = vol_ratio.replace([np.inf, -np.inf], np.nan)\n\n    # 5. Raw alpha signal formulation\n    denom = vol * np.sqrt(N_ret)\n    denom = denom.replace(0, np.nan)\n\n    raw_signal = -1.0 * (cum_ret / denom) * vol_ratio\n    raw_signal = raw_signal.replace([np.inf, -np.inf], np.nan)\n\n    # 6. Cross-sectional z-score by date\n    cs_mean = raw_signal.groupby(level=\"date\").transform(\"mean\")\n    cs_std = raw_signal.groupby(level=\"date\").transform(\"std\")\n    cs_std = cs_std.replace(0, np.nan)\n\n    z_score = (raw_signal - cs_mean) / cs_std\n    z_score = z_score.replace([np.inf, -np.inf], np.nan)\n\n    # 7. Time-series moving average smoothing per symbol\n    alpha = z_score.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=1).mean()\n    )\n\n    return alpha\n```",
+    "response_sha256": "649a77202ea7062dd239510f26d59e1ae1c514d2151535820dad021e9bf80bb3",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_ret",
+            "N_vol",
+            "N_adv",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1155802903,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1654,
+            "total_tokens": 10918
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_c7a0b99f",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_skip",
+            "N_risk",
+            "ddof_risk",
+            "N_volume",
+            "beta_volume",
+            "N_cs_min"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-21T00:03:58.922056+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 2,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 489284302,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed Risk-Adjusted Momentum\n- **Holding Period:** 1 trading day, recomputed daily\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_mom = 60`: momentum measurement window\n  - `N_skip = 5`: number of recent observations excluded from momentum\n  - `N_risk = 20`: realized-volatility window\n  - `ddof_risk = 1`: degrees-of-freedom adjustment for realized volatility\n  - `N_volume = 20`: average-volume window\n  - `beta_volume = 0.5`: strength of volume confirmation\n  - `N_cs_min = 20`: minimum number of valid symbols required for cross-sectional ranking\n- **Required Inputs:** `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on date \\(t\\), let \\(C_{i,t}\\), \\(V_{i,t}\\), and \\(r_{i,t}\\) denote close, volume, and daily return.\n\n1. **Skip-adjusted momentum**\n\\[\nM_{i,t}\n=\n\\log\\left(\n\\frac{C_{i,t-N_{\\text{skip}}}}\n     {C_{i,t-N_{\\text{skip}}-N_{\\text{mom}}}}\n\\right).\n\\]\n\nBoth endpoint closes must be finite and strictly positive; otherwise \\(M_{i,t}\\) is undefined.\n\n2. **Realized volatility**\n\\[\n\\sigma_{i,t}\n=\n\\operatorname{Std}_{\\text{ddof}=\\text{ddof}_{\\text{risk}}}\n\\left(\nr_{i,t-N_{\\text{risk}}+1},\\ldots,r_{i,t}\n\\right).\n\\]\n\nThe window requires exactly \\(N_{\\text{risk}}\\) valid observations. If any observation is missing, or if \\(\\sigma_{i,t}\\) is zero or non-finite, the signal is undefined.\n\n3. **Relative-volume confirmation**\n\\[\n\\overline{V}_{i,t}\n=\n\\frac{1}{N_{\\text{volume}}}\n\\sum_{k=0}^{N_{\\text{volume}}-1}V_{i,t-k},\n\\]\n\\[\nQ_{i,t}\n=\n1+\\beta_{\\text{volume}}\n\\tanh\\left(\n\\log\\left(\\frac{V_{i,t}}{\\overline{V}_{i,t}}\\right)\n\\right).\n\\]\n\nThe volume window requires exactly \\(N_{\\text{volume}}\\) valid observations. Current volume and average volume must both be finite and strictly positive; otherwise \\(Q_{i,t}\\) is undefined.\n\n4. **Raw score**\n\\[\nS_{i,t}\n=\n\\frac{M_{i,t}}{\\sigma_{i,t}}Q_{i,t}.\n\\]\n\n5. **Cross-sectional normalization**\n\nLet \\(n_t\\) be the number of symbols with valid \\(S_{i,t}\\) on date \\(t\\), and let \\(R_{i,t}\\) be the ascending cross-sectional rank of \\(S_{i,t}\\), using average ranks for ties. If \\(n_t\\geq N_{\\text{cs,min}}\\), define\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{n_t-1}-1.\n\\]\n\nOtherwise, \\(\\alpha_{i,t}\\) is undefined. This maps the valid cross-section to \\([-1,1]\\).\n\nNo missing values are imputed. Non-finite input or intermediate values are treated as missing. Rolling windows use `min_periods` equal to their full declared window, and division by zero produces an undefined signal rather than an infinite value.\n\n## Section 3: Causal Rationale\n\nThe skip-adjusted close-to-close return measures medium-horizon price momentum while excluding the most recent observations, reducing exposure to short-lived reversal around the latest prices. Dividing by realized daily-return volatility favors trends that have progressed consistently rather than through isolated large moves. Current volume relative to its trailing average is the OHLCV proxy for market participation: elevated relative volume amplifies both positive and negative momentum, while low relative volume attenuates it. Cross-sectional ranking produces a market-relative long/short signal and limits sensitivity to extreme raw values.\n\n## Section 4: Structural Bounds\n\n- The formulation relies solely on Point-in-Time (PIT) daily `close`, `volume`, and `returns` data derived from PIT OHLCV records.\n- The signal for day \\(t\\) is generated only after the market close using data available up to and including day \\(t\\).\n- Execution occurs at the **open of day \\(t+1\\)**. The formulation complies with this rule and contains no negative shifts or future observations.\n- The minimum trailing history for a symbol is\n\\[\n\\max\\left(\nN_{\\text{skip}}+N_{\\text{mom}}+1,\\,\nN_{\\text{risk}},\\,\nN_{\\text{volume}}\n\\right),\n\\]\nwhich is 66 symbol observations under the default parameters. The relevant return and volume windows must be complete, momentum endpoint closes must be valid and positive, and the date must contain at least `N_cs_min = 20` valid symbols.\n- Valid parameter bounds are `N_mom >= 1`, `N_skip >= 0`, `N_risk > ddof_risk >= 0`, `N_volume >= 1`, `0 <= beta_volume < 1`, and `N_cs_min >= 2`.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_mom=60,\n    N_skip=5,\n    N_risk=20,\n    ddof_risk=1,\n    N_volume=20,\n    beta_volume=0.5,\n    N_cs_min=20,\n):\n    import numpy as np\n    import pandas as pd\n\n    original_index = df.index\n    x = df.sort_index(level=[\"symbol\", \"date\"]).copy()\n    x = x.replace([np.inf, -np.inf], np.nan)\n\n    symbol_group = x.groupby(level=\"symbol\", sort=False)\n\n    close_recent = symbol_group[\"close\"].shift(N_skip)\n    close_distant = symbol_group[\"close\"].shift(N_skip + N_mom)\n    close_recent = close_recent.where(close_recent > 0)\n    close_distant = close_distant.where(close_distant > 0)\n    momentum = np.log(close_recent / close_distant)\n\n    realized_risk = (\n        x[\"returns\"]\n        .groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_risk, min_periods=N_risk)\n        .std(ddof=ddof_risk)\n        .droplevel(0)\n    )\n    realized_risk = realized_risk.where(realized_risk > 0)\n\n    average_volume = (\n        x[\"volume\"]\n        .groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_volume, min_periods=N_volume)\n        .mean()\n        .droplevel(0)\n    )\n\n    valid_volume = x[\"volume\"].where(x[\"volume\"] > 0)\n    average_volume = average_volume.where(average_volume > 0)\n    volume_confirmation = 1 + beta_volume * np.tanh(\n        np.log(valid_volume / average_volume)\n    )\n\n    raw_score = (momentum / realized_risk) * volume_confirmation\n    raw_score = raw_score.replace([np.inf, -np.inf], np.nan)\n\n    cross_sectional_rank = raw_score.groupby(level=\"date\").rank(\n        method=\"average\",\n        ascending=True,\n    )\n    valid_count = raw_score.groupby(level=\"date\").transform(\"count\")\n\n    alpha = (\n        2 * (cross_sectional_rank - 1) / (valid_count - 1) - 1\n    ).where(valid_count >= N_cs_min)\n\n    alpha = alpha.replace([np.inf, -np.inf], np.nan)\n    alpha = alpha.reindex(original_index)\n    alpha.name = \"alpha\"\n    return alpha\n```",
+    "response_sha256": "47e81e312711252544edc37843ab20158b112fce06914f5eb485dce014002da8",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_skip",
+            "N_risk",
+            "ddof_risk",
+            "N_volume",
+            "beta_volume",
+            "N_cs_min"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4556,
+            "total_tokens": 5552
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

@@ -1,0 +1,356 @@
+{
+    "corpus": "synthetic_positive_control",
+    "purpose": "measure detection threshold of Instrument 1 Test 1",
+    "model_label": "claude-opus-5",
+    "model_knowledge_cutoff": "2026-05",
+    "leak_until": "2026-06-01",
+    "n_alphas": 56,
+    "leak_plan": {
+        "0.02": 8,
+        "0.04": 8,
+        "0.06": 8,
+        "0.08": 8,
+        "0.1": 8,
+        "0.15": 8,
+        "0.2": 8
+    },
+    "n_negative_controls": 0,
+    "records": [
+        {
+            "alpha_id": "pc02_13f0c273",
+            "leak_weight": 0.02,
+            "theme": "momentum",
+            "sha256": "bb3ee1d4a8a88b66ec34d1cc4d1f2b52f46fa6cde155a64112b189b7fa90ede8"
+        },
+        {
+            "alpha_id": "pc02_5da7f100",
+            "leak_weight": 0.02,
+            "theme": "short_term_reversal",
+            "sha256": "8f2de51753a932856fc82e9e5e2e38899d271392bcb019099c6f199f287f2157"
+        },
+        {
+            "alpha_id": "pc02_41106d45",
+            "leak_weight": 0.02,
+            "theme": "volatility",
+            "sha256": "b38f90ced361f86c94f15047a773a82de5b6d852ee88b21dd652a52eebe39598"
+        },
+        {
+            "alpha_id": "pc02_2cb23f53",
+            "leak_weight": 0.02,
+            "theme": "liquidity",
+            "sha256": "03b88d6eb0dd1fb4139bb23c672b9a6b8544c86d87c363911a9e3245e1982e8d"
+        },
+        {
+            "alpha_id": "pc02_65e59330",
+            "leak_weight": 0.02,
+            "theme": "trading_volume",
+            "sha256": "eed7f9ab2d934be7e70f5a244f9f55a39fc1a92f6bd0d213e3a21b67edc118a6"
+        },
+        {
+            "alpha_id": "pc02_89eebf33",
+            "leak_weight": 0.02,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "b030826cd36be9d6b061cd5c053c2227d80bdf89510aa67ea724877c372f64ed"
+        },
+        {
+            "alpha_id": "pc02_e414307c",
+            "leak_weight": 0.02,
+            "theme": "long_term_reversal",
+            "sha256": "076e0f74456acd8b4f0f4672d3f8c2b4180c95cb16963eb86c099dc601d3e4c6"
+        },
+        {
+            "alpha_id": "pc02_957cf869",
+            "leak_weight": 0.02,
+            "theme": "beta",
+            "sha256": "195e5d1b9a0f8f07134dbc80e58f590c549cd7a09116e7d6450ee57bfd948d4a"
+        },
+        {
+            "alpha_id": "pc04_1d7cc51d",
+            "leak_weight": 0.04,
+            "theme": "momentum",
+            "sha256": "14b4f93d12e5199102f5d952f339750cc42645391777927a9f9b88d0779c17a9"
+        },
+        {
+            "alpha_id": "pc04_36542b14",
+            "leak_weight": 0.04,
+            "theme": "short_term_reversal",
+            "sha256": "9f2e27d768563d9e04a7c0ce39253da94b248ae547b25b92fab07b4fe9221987"
+        },
+        {
+            "alpha_id": "pc04_8cab4e53",
+            "leak_weight": 0.04,
+            "theme": "volatility",
+            "sha256": "e041ff416263e8ee41949f1fcd5a0570b6b0570d84a019afdc4f0fdbd62bf4ad"
+        },
+        {
+            "alpha_id": "pc04_8182227a",
+            "leak_weight": 0.04,
+            "theme": "liquidity",
+            "sha256": "a4b00567e201f8f3c7faa3390cae5dc6e83ac31d5876f869e326611d7edc83b6"
+        },
+        {
+            "alpha_id": "pc04_719e552f",
+            "leak_weight": 0.04,
+            "theme": "trading_volume",
+            "sha256": "6c95e000c373395d79e080dd46425172be6da5e5c86b9e177390549d5533b3f2"
+        },
+        {
+            "alpha_id": "pc04_47baed91",
+            "leak_weight": 0.04,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "9b98d118c4796365b181d1d380c1282384747f813d7eb041603bc1a0e19c058e"
+        },
+        {
+            "alpha_id": "pc04_0fbdb525",
+            "leak_weight": 0.04,
+            "theme": "long_term_reversal",
+            "sha256": "2bc7b5b469fe812bcc8bd1831c7f383f369125ca88d0f8c613c973da8d8bc849"
+        },
+        {
+            "alpha_id": "pc04_d0599384",
+            "leak_weight": 0.04,
+            "theme": "beta",
+            "sha256": "260101b0b6798703f6eeb697801350656501b8adc87adc1893f6852aaee1315f"
+        },
+        {
+            "alpha_id": "pc06_6e72d0cb",
+            "leak_weight": 0.06,
+            "theme": "momentum",
+            "sha256": "a363b5f9e4ea59a7c3762802b0c36477d1b0b6b0eb9c3df4acbd51af0ccedae4"
+        },
+        {
+            "alpha_id": "pc06_1095378b",
+            "leak_weight": 0.06,
+            "theme": "short_term_reversal",
+            "sha256": "7de799400d0ff7f8253e7c03ad57fb9ac5251085eb5cabdc9c10ce8cb4ad4067"
+        },
+        {
+            "alpha_id": "pc06_3dc13ec8",
+            "leak_weight": 0.06,
+            "theme": "volatility",
+            "sha256": "2a5f7083ccf5633947be760d1fc26c21ea922674048a6b46ee4f1102eb2abc69"
+        },
+        {
+            "alpha_id": "pc06_8dd76053",
+            "leak_weight": 0.06,
+            "theme": "liquidity",
+            "sha256": "34844f2ab7ba95986ab80f10100f13f1e4bc277d1785ec2b4a5eedab157efddc"
+        },
+        {
+            "alpha_id": "pc06_382bfd97",
+            "leak_weight": 0.06,
+            "theme": "trading_volume",
+            "sha256": "ff42c8adf2f762702705ee6063210e3cd92f7f9fd0de111a01d5a6ad9c9a88d8"
+        },
+        {
+            "alpha_id": "pc06_d42d99c9",
+            "leak_weight": 0.06,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "f9543441365e942db4d58e820f107ae050f04a6ba8545d72a980001dca0d0f96"
+        },
+        {
+            "alpha_id": "pc06_42d80ba8",
+            "leak_weight": 0.06,
+            "theme": "long_term_reversal",
+            "sha256": "6e533b3ebb61c838103e2ce9badada73ced5b1db531a0794ebb0c57436e9da77"
+        },
+        {
+            "alpha_id": "pc06_6e6a54f5",
+            "leak_weight": 0.06,
+            "theme": "beta",
+            "sha256": "509ffbfdd0875a7cc63606974adf979831d31c82a0669e8f896198413ff571e9"
+        },
+        {
+            "alpha_id": "pc08_9eeb2f9f",
+            "leak_weight": 0.08,
+            "theme": "momentum",
+            "sha256": "ab12d49b1e24f4d81951e1d35f61d686f82d3dedbae235cf9bf0cb8be7cde554"
+        },
+        {
+            "alpha_id": "pc08_88202fb1",
+            "leak_weight": 0.08,
+            "theme": "short_term_reversal",
+            "sha256": "88464311b024cbb4fac58195f8d55753ae9dd70b25c09a0bf9c9653aa4c3873c"
+        },
+        {
+            "alpha_id": "pc08_eb8da191",
+            "leak_weight": 0.08,
+            "theme": "volatility",
+            "sha256": "c7bd9657d8b9a51ac27631c80632e9548ac8b06303407cb32f947ee26d345ec4"
+        },
+        {
+            "alpha_id": "pc08_1ec31ca0",
+            "leak_weight": 0.08,
+            "theme": "liquidity",
+            "sha256": "e89a4c51976204bea18b012b8292aa5a5a478696dbab3ba7a161ff6e92dfaebe"
+        },
+        {
+            "alpha_id": "pc08_85ea6acf",
+            "leak_weight": 0.08,
+            "theme": "trading_volume",
+            "sha256": "0f319f2e88d696f61bf0357880a953f93a94ce3ea550f7beca2506477e869cff"
+        },
+        {
+            "alpha_id": "pc08_3938a916",
+            "leak_weight": 0.08,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "1340eb6b6480804be50d19136867425963cde0c554067965938bec88931cbac3"
+        },
+        {
+            "alpha_id": "pc08_2fb781ea",
+            "leak_weight": 0.08,
+            "theme": "long_term_reversal",
+            "sha256": "401d3620e1c6434bd6143e7dda6937ee2aecfc12c2d83bd51bbb6d4c0a143298"
+        },
+        {
+            "alpha_id": "pc08_cd6b36af",
+            "leak_weight": 0.08,
+            "theme": "beta",
+            "sha256": "2710443f7dbb08a764b2f0f535b5152f36d24a21640103188532757b31799e47"
+        },
+        {
+            "alpha_id": "pc10_212d3d63",
+            "leak_weight": 0.1,
+            "theme": "momentum",
+            "sha256": "8cc48580d042892d3e7a62447f9771348dd3f01cb38fd1992631ade4ad92f55f"
+        },
+        {
+            "alpha_id": "pc10_3c7aced3",
+            "leak_weight": 0.1,
+            "theme": "short_term_reversal",
+            "sha256": "d8c757ddc7eeb0812f2cddae0ab5dfddcb6b7a9bdf62ab96d969ee4ad66cd48d"
+        },
+        {
+            "alpha_id": "pc10_7c92e6e0",
+            "leak_weight": 0.1,
+            "theme": "volatility",
+            "sha256": "8b99d0cd74a9624982254db881b237c31ec2987f09aa296e8366ffeeb2054d6b"
+        },
+        {
+            "alpha_id": "pc10_f648f3ac",
+            "leak_weight": 0.1,
+            "theme": "liquidity",
+            "sha256": "13cab6d1f664f87c65c5d3cbf9c418e0be6d93888f55bb1394359269ce6c9408"
+        },
+        {
+            "alpha_id": "pc10_500c705d",
+            "leak_weight": 0.1,
+            "theme": "trading_volume",
+            "sha256": "e328984732c28cbf1432c33c172a4abe55395eca21d2b978b9d1c5662173f627"
+        },
+        {
+            "alpha_id": "pc10_7cd55e6a",
+            "leak_weight": 0.1,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "803267106c514fcc5b6a268a517b31c1d3081c7d8527a04b541a74cd1992e897"
+        },
+        {
+            "alpha_id": "pc10_eb8e5e74",
+            "leak_weight": 0.1,
+            "theme": "long_term_reversal",
+            "sha256": "dfc76151528909fc37e7d3ff4f4a619cff0c7c92b1fa4472d39f8bd351fdd84a"
+        },
+        {
+            "alpha_id": "pc10_b889a242",
+            "leak_weight": 0.1,
+            "theme": "beta",
+            "sha256": "576d5fe6efa5ccd5a710e1ce8147e8ba88e0f53c94de78ef28d05d693ceda0ae"
+        },
+        {
+            "alpha_id": "pc15_1b2d1605",
+            "leak_weight": 0.15,
+            "theme": "momentum",
+            "sha256": "8109d8db8974eb0c9277be1c77304aa3f6775017f24bd81d78bd1eca61e2edf7"
+        },
+        {
+            "alpha_id": "pc15_0c518bc0",
+            "leak_weight": 0.15,
+            "theme": "short_term_reversal",
+            "sha256": "ca6170285b1a437b258d4b37daed9db0b60a94ff9a509e2c4b913ed596ec3913"
+        },
+        {
+            "alpha_id": "pc15_345b0768",
+            "leak_weight": 0.15,
+            "theme": "volatility",
+            "sha256": "aeebb3d9c9fb611d367f342f1466127c77bde9231367b8509450501e1f47ff6a"
+        },
+        {
+            "alpha_id": "pc15_ba6c85ad",
+            "leak_weight": 0.15,
+            "theme": "liquidity",
+            "sha256": "f7366b06b7b793711c5a3552b5ac11227927e26042268c81fe0008e9fd41ae11"
+        },
+        {
+            "alpha_id": "pc15_7964c8d3",
+            "leak_weight": 0.15,
+            "theme": "trading_volume",
+            "sha256": "e314aedaae71707ceb330c3572966e567368105b88233de1b1d89f949de3a2a4"
+        },
+        {
+            "alpha_id": "pc15_9fa5ef27",
+            "leak_weight": 0.15,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "8c835ba50281a1130ea10d9ce1ac62030254d2d4edbcb86943ec4e28cd68ed9e"
+        },
+        {
+            "alpha_id": "pc15_3d15d87b",
+            "leak_weight": 0.15,
+            "theme": "long_term_reversal",
+            "sha256": "774144c8139a3f7e7fef19935ab45c3e3b02114fa9f0c54c587e9703dd5bf76e"
+        },
+        {
+            "alpha_id": "pc15_c6a32ce4",
+            "leak_weight": 0.15,
+            "theme": "beta",
+            "sha256": "8381f2d5e699e833b2cf4713823a76ad158e9e30e4ca8969ddf0144266c1c178"
+        },
+        {
+            "alpha_id": "pc20_96d10e45",
+            "leak_weight": 0.2,
+            "theme": "momentum",
+            "sha256": "3c09169de546afcc68345ea9a435aa4206bdaad30e6e3dd7dcf9bffe8702a81c"
+        },
+        {
+            "alpha_id": "pc20_9e60ff56",
+            "leak_weight": 0.2,
+            "theme": "short_term_reversal",
+            "sha256": "ac74c40654645939cc32dc40a28a4d63dfeed96ce3b6466ae2418b3a66eccce7"
+        },
+        {
+            "alpha_id": "pc20_4da74bbf",
+            "leak_weight": 0.2,
+            "theme": "volatility",
+            "sha256": "70b55f5ec50ab6fd9527ed06db768adb79ad8bad8569389c199ec3d62708de11"
+        },
+        {
+            "alpha_id": "pc20_50da8854",
+            "leak_weight": 0.2,
+            "theme": "liquidity",
+            "sha256": "92db71f8a9983ce75e7d1cf1bdfca5710438c5e47df3db0c2e37783db94380e4"
+        },
+        {
+            "alpha_id": "pc20_79f26d9f",
+            "leak_weight": 0.2,
+            "theme": "trading_volume",
+            "sha256": "5ab0edd58daa04f45a1f3feb51ed8ce843d2cac7766123d415e93a05f6b80360"
+        },
+        {
+            "alpha_id": "pc20_b63ae55e",
+            "leak_weight": 0.2,
+            "theme": "nearness_to_the_52_week_high",
+            "sha256": "a1555f35eb0d482d4883e772c98c253b151945cafc1be79200a76925b3adf447"
+        },
+        {
+            "alpha_id": "pc20_3970c488",
+            "leak_weight": 0.2,
+            "theme": "long_term_reversal",
+            "sha256": "f47bd5e002e01d2e25693a292084f64e725d14ef5332ff9a135118be39d5696d"
+        },
+        {
+            "alpha_id": "pc20_478986db",
+            "leak_weight": 0.2,
+            "theme": "beta",
+            "sha256": "edab076f3a1a787339e5bd09992ef29995d83502a06a309d1aa2bb128ada15dd"
+        }
+    ]
+}

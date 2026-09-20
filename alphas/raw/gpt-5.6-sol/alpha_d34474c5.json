@@ -1,0 +1,100 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_d34474c5",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_liq",
+            "N_cs",
+            "rank_center",
+            "alpha_scale"
+        ],
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-21T00:17:32.251027+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 13,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2050232787,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Relative Illiquidity Pressure Reversal\n- **Holding Period:** 1 trading day\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_liq = 20`: number of prior symbol observations used to estimate normal illiquidity; must be positive.\n  - `N_cs = 20`: minimum number of valid symbols required for cross-sectional ranking; must be at least 2.\n  - `rank_center = 0.5`: center of the cross-sectional percentile score.\n  - `alpha_scale = 2.0`: scale applied to the centered percentile score.\n- **Required Inputs:** `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on day \\(t\\), let \\(C_{i,t}\\), \\(V_{i,t}\\), and \\(r_{i,t}\\) denote close, volume, and daily return, respectively.\n\nDefine dollar volume:\n\n\\[\nD_{i,t}=C_{i,t}V_{i,t}.\n\\]\n\nDefine the daily illiquidity proxy:\n\n\\[\nI_{i,t}=\n\\frac{|r_{i,t}|}{D_{i,t}},\n\\]\n\nprovided \\(C_{i,t}>0\\), \\(V_{i,t}>0\\), and all three inputs are finite. Otherwise, \\(I_{i,t}\\) is undefined.\n\nEstimate normal illiquidity using only prior observations:\n\n\\[\n\\overline{I}_{i,t}^{\\mathrm{prior}}\n=\n\\frac{1}{N_{\\mathrm{liq}}}\n\\sum_{k=1}^{N_{\\mathrm{liq}}} I_{i,t-k}.\n\\]\n\nThe rolling mean is defined only when all `N_liq` preceding symbol observations have valid \\(I\\) values. Windows refer to the most recent observed rows for the symbol rather than calendar days.\n\nDefine signed relative liquidity pressure:\n\n\\[\nX_{i,t}\n=\n-r_{i,t}\n\\frac{I_{i,t}}{\\overline{I}_{i,t}^{\\mathrm{prior}}}.\n\\]\n\nIf the denominator is zero, or any component is missing or non-finite, \\(X_{i,t}\\) is undefined.\n\nOn each date \\(t\\), let \\(m_t\\) be the number of symbols with valid \\(X_{i,t}\\). Let \\(R_{i,t}\\) be the ascending cross-sectional rank of \\(X_{i,t}\\), using average ranks for ties. Define:\n\n\\[\nP_{i,t}\n=\n\\frac{R_{i,t}-1}{m_t-1},\n\\]\n\nand the final alpha:\n\n\\[\n\\alpha_{i,t}\n=\n\\mathrm{alpha\\_scale}\n\\left(P_{i,t}-\\mathrm{rank\\_center}\\right).\n\\]\n\nThe final alpha is defined only if \\(m_t \\geq N_{\\mathrm{cs}}\\). Missing observations are not imputed. Infinite values are treated as undefined. No clipping is applied.\n\n## Section 3: Causal Rationale\n\nAbsolute return per dollar volume is an OHLCV-observable proxy for the price impact associated with limited trading liquidity. A return accompanied by unusually high price impact relative to the symbol\u2019s own trailing baseline is more likely to contain temporary liquidity pressure than a similarly sized return occurring in deeper trading conditions. Reversing the return sign therefore targets short-horizon normalization after unusually illiquid price moves. Cross-sectional ranking limits the influence of the extreme scale and skewness inherent in price-impact ratios.\n\n## Section 4: Structural Bounds\n\nThe alpha relies solely on Point-in-Time (PIT) daily `close`, `volume`, and `returns` data drawn from the permitted OHLCV and returns fields.\n\nThe signal for day \\(t\\) is generated using information available up to and including the market close on day \\(t\\), and execution occurs at the open of day \\(t+1\\). The formulation complies with this rule because the current-day inputs are available at the close and the illiquidity baseline uses only observations preceding day \\(t\\). The implementation returns the signal aligned to day \\(t\\) and does not apply the execution lag.\n\nA symbol requires at least `N_liq + 1` consecutive valid observed rows: the current observation and `N_liq` valid prior observations. Its prior illiquidity mean must also be nonzero. In addition, at least `N_cs` symbols must have valid raw signals on the same date.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_liq=20,\n    N_cs=20,\n    rank_center=0.5,\n    alpha_scale=2.0\n):\n    import numpy as np\n    import pandas as pd\n\n    x = df.sort_index()\n\n    close = x[\"close\"].where(np.isfinite(x[\"close\"]))\n    volume = x[\"volume\"].where(np.isfinite(x[\"volume\"]))\n    returns = x[\"returns\"].where(np.isfinite(x[\"returns\"]))\n\n    dollar_volume = (close * volume).where((close > 0) & (volume > 0))\n    illiquidity = (returns.abs() / dollar_volume).where(\n        np.isfinite(returns.abs() / dollar_volume)\n    )\n\n    prior_illiquidity = illiquidity.groupby(level=\"symbol\").shift(1)\n    normal_illiquidity = (\n        prior_illiquidity.groupby(level=\"symbol\")\n        .rolling(window=N_liq, min_periods=N_liq)\n        .mean()\n        .droplevel(0)\n    )\n\n    relative_illiquidity = (illiquidity / normal_illiquidity).where(\n        (normal_illiquidity != 0)\n        & np.isfinite(illiquidity / normal_illiquidity)\n    )\n    raw_signal = (-returns * relative_illiquidity).where(\n        np.isfinite(-returns * relative_illiquidity)\n    )\n\n    cross_sectional_rank = raw_signal.groupby(level=\"date\").rank(\n        method=\"average\",\n        na_option=\"keep\"\n    )\n    valid_count = raw_signal.notna().groupby(level=\"date\").transform(\"sum\")\n\n    percentile = (cross_sectional_rank - 1) / (valid_count - 1)\n    alpha = alpha_scale * (percentile - rank_center)\n    alpha = alpha.where(valid_count >= N_cs)\n    alpha.name = \"alpha\"\n\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "545126a45aeefa3ba43b766e5db18c21cf176b630076ed03472588b870abdc69",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_liq",
+            "N_cs",
+            "rank_center",
+            "alpha_scale"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 2910,
+            "total_tokens": 3906
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

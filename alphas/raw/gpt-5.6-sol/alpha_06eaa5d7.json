@@ -1,0 +1,100 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_06eaa5d7",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_skip",
+            "D_vol",
+            "N_cs_min"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-21T00:01:14.693222+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 0,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1243873348,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Skipped Volatility-Scaled Intermediate Momentum\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_mom = 126`: momentum and realized-volatility lookback\n  - `N_skip = 5`: number of recent trading days excluded\n  - `D_vol = 0`: degrees of freedom used by realized volatility\n  - `N_cs_min = 2`: minimum valid symbols required for cross-sectional ranking\n- **Required Inputs:** `close`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(C_{i,t}\\) be the closing price and \\(r_{i,t}\\) be the daily return supplied in the `returns` column.\n\nDefine skipped intermediate momentum as:\n\n\\[\nM_{i,t}\n=\n\\frac{C_{i,t-N_{\\text{skip}}}}\n     {C_{i,t-N_{\\text{skip}}-N_{\\text{mom}}}}\n-1.\n\\]\n\nDefine the mean return over the corresponding momentum interval:\n\n\\[\n\\bar r_{i,t}\n=\n\\frac{1}{N_{\\text{mom}}}\n\\sum_{k=N_{\\text{skip}}}^{N_{\\text{skip}}+N_{\\text{mom}}-1}\nr_{i,t-k}.\n\\]\n\nDefine realized volatility over that interval as:\n\n\\[\n\\sigma_{i,t}\n=\n\\sqrt{\n\\frac{\n\\sum_{k=N_{\\text{skip}}}^{N_{\\text{skip}}+N_{\\text{mom}}-1}\n\\left(r_{i,t-k}-\\bar r_{i,t}\\right)^2\n}{\nN_{\\text{mom}}-D_{\\text{vol}}\n}\n}.\n\\]\n\nThe raw volatility-scaled momentum score is:\n\n\\[\nS_{i,t}\n=\n\\frac{M_{i,t}}\n{\\sigma_{i,t}\\sqrt{N_{\\text{mom}}}}.\n\\]\n\nOn each date \\(t\\), let \\(n_t\\) be the number of symbols with finite \\(S_{i,t}\\), and let \\(R_{i,t}\\) be the ascending cross-sectional rank of \\(S_{i,t}\\), using average ranks for ties. The final alpha is:\n\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{n_t-1}-1,\n\\qquad n_t \\geq N_{\\text{cs\\_min}}.\n\\]\n\nThus, the lowest valid raw score receives \\(-1\\), and the highest receives \\(+1\\).\n\nThe volatility window requires exactly `N_mom` non-missing, finite returns (`min_periods = N_mom`). Missing or non-finite inputs are not imputed. Momentum is undefined if either endpoint close is missing or non-finite, or if the denominator close is zero. The raw score is undefined when realized volatility is missing, non-finite, or non-positive. Cross-sectional ranks exclude undefined scores, and alpha is undefined when fewer than `N_cs_min` valid symbols are available.\n\n## Section 3: Causal Rationale\n\nMulti-month close-to-close momentum can reflect gradual adjustment to information, observable as persistent directional movement in daily closing prices. Excluding the most recent `N_skip` days reduces exposure to short-lived price dislocations and near-term reversals. Scaling momentum by realized daily-return volatility favors trends that accumulated through a comparatively stable path rather than through a few unusually large moves. Cross-sectional ranking expresses the mechanism as relative continuation among contemporaneously observable US equities.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time (PIT) daily `close` and `returns` data drawn from the permitted OHLCV dataset. The signal for day \\(t\\) is generated after the market close using only data available up to and including that close, and execution occurs at the open of day \\(t+1\\). The returned signal remains aligned to day \\(t\\); no execution lag is applied within the implementation.\n\nA symbol requires at least\n\n\\[\nN_{\\text{skip}}+N_{\\text{mom}}+1\n\\]\n\ntrailing symbol observations, equal to 132 observations under the defaults, with valid endpoint closes and all `N_mom` required returns. At least `N_cs_min` valid symbols must also be present on date \\(t\\).\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_mom=126,\n    N_skip=5,\n    D_vol=0,\n    N_cs_min=2\n):\n    import numpy as np\n    import pandas as pd\n\n    original_index = df.index\n    df = df.sort_index(level=[\"symbol\", \"date\"])\n\n    symbol_group = df.groupby(level=\"symbol\", sort=False)\n\n    lagged_close = symbol_group[\"close\"].shift(N_skip)\n    base_close = symbol_group[\"close\"].shift(N_skip + N_mom)\n\n    lagged_close = lagged_close.where(np.isfinite(lagged_close))\n    base_close = base_close.where(np.isfinite(base_close))\n\n    momentum = (lagged_close / base_close - 1).where(base_close.ne(0))\n\n    shifted_returns = symbol_group[\"returns\"].shift(N_skip)\n    shifted_returns = shifted_returns.where(np.isfinite(shifted_returns))\n\n    realized_vol = (\n        shifted_returns.groupby(level=\"symbol\", sort=False)\n        .rolling(\n            window=N_mom,\n            min_periods=N_mom\n        )\n        .std(ddof=D_vol)\n        .droplevel(0)\n    )\n\n    risk_scale = realized_vol * np.sqrt(N_mom)\n    raw_score = (momentum / risk_scale).where(\n        risk_scale.gt(0) & np.isfinite(risk_scale)\n    )\n    raw_score = raw_score.where(np.isfinite(raw_score))\n\n    cross_sectional_rank = raw_score.groupby(\n        level=\"date\", sort=False\n    ).rank(method=\"average\", na_option=\"keep\")\n\n    valid_count = raw_score.groupby(\n        level=\"date\", sort=False\n    ).transform(\"count\")\n\n    alpha = (\n        2 * (cross_sectional_rank - 1) / (valid_count - 1) - 1\n    ).where(valid_count >= N_cs_min)\n\n    alpha = alpha.reindex(original_index)\n    alpha.name = \"alpha\"\n    return alpha\n```",
+    "response_sha256": "73bb8c0cd9b15c778a7e6860e706680d359ede4fe02dd0486cc27d2e8e9029a9",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_skip",
+            "D_vol",
+            "N_cs_min"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 4057,
+            "total_tokens": 5053
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

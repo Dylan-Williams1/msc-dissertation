@@ -1,0 +1,78 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_e31df18b",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 544188757,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_ret",
+            "N_vol",
+            "min_obs"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-24T18:30:51.729862+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 5,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volatility_Adjusted_Short_Term_Reversal\n- Holding Period: 2 days\n- Orientation: Long/Short\n- Parameters: `N_ret = 3`, `N_vol = 20`, `min_obs = 20`\n- Required Inputs: `close`, `returns`\n\n# Section 2: Mathematical Formulation\n1. Cumulative $N_{ret}$-day close-to-close return for asset $i$ on date $t$:\n$$R_{i,t} = \\frac{\\text{close}_{i,t}}{\\text{close}_{i,t - N_{ret}}} - 1$$\n\n2. Rolling sample standard deviation of daily close-to-close returns over window $N_{vol}$:\n$$\\sigma_{i,t} = \\sqrt{\\frac{1}{N_{vol} - 1} \\sum_{k=0}^{N_{vol}-1} \\left(\\text{returns}_{i,t-k} - \\bar{r}_{i,t}\\right)^2}$$\nwhere $\\bar{r}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} \\text{returns}_{i,t-k}$.\n\n3. Volatility-standardized return strain ($S_{i,t}$):\n$$S_{i,t} = \\frac{R_{i,t}}{\\sigma_{i,t} \\cdot \\sqrt{N_{ret}}}$$\n\n4. Cross-sectional mean ($\\mu_t$) and sample standard deviation ($\\sigma_{CS,t}$) of $S_{i,t}$ across all $M_t$ valid assets on date $t$:\n$$\\mu_t = \\frac{1}{M_t} \\sum_{i=1}^{M_t} S_{i,t}$$\n$$\\sigma_{CS,t} = \\sqrt{\\frac{1}{M_t - 1} \\sum_{i=1}^{M_t} \\left(S_{i,t} - \\mu_t\\right)^2}$$\n\n5. Cross-sectional Z-score ($Z_{i,t}$):\n$$Z_{i,t} = \\frac{S_{i,t} - \\mu_t}{\\sigma_{CS,t}}$$\n\n6. Final alpha signal ($\\alpha_{i,t}$):\n$$\\alpha_{i,t} = -Z_{i,t}$$\n\nHandling of Undefined Values:\n- Time-series rolling volatility calculation requires a minimum of $min\\_obs = 20$ non-null observations in the trailing $N_{vol}$ window; otherwise, $\\sigma_{i,t}$ is set to NaN.\n- If $\\sigma_{i,t} = 0$, $S_{i,t}$ is set to NaN to prevent division by zero.\n- Cross-sectional calculations require at least $M_t \\ge 2$ non-null observations per date and $\\sigma_{CS,t} > 0$; if $\\sigma_{CS,t} = 0$ or $M_t < 2$, $Z_{i,t}$ is set to NaN.\n- Any missing observations in `close` or `returns` propagate as NaN.\n\n# Section 3: Causal Rationale\nShort-term price reversals over multi-day horizons arise primarily from transient supply-demand imbalances and temporary inventory absorption costs borne by market makers. When an asset experiences a rapid price move over $N_{ret}$ days relative to its historical return volatility over $N_{vol}$ days, liquidity providers demand a temporary compensation premium, pushing prices temporarily past fundamental equilibrium. As liquidity provision normalizes over subsequent trading sessions, temporary price pressure abates and returns mean-revert toward baseline levels. Standardized scaling by rolling return volatility ensures that signals capture statistically extreme price dislocations across assets rather than persistent structural beta differences.\n\n# Section 4: Structural Bounds\n- Data Integrity: The formulation relies exclusively on Point-in-Time (PIT) OHLCV data available at or prior to the signal generation date.\n- Execution Timing Rule: The signal $\\alpha_{i,t}$ is computed using data available up to market close on day $t$. All portfolio reallocation and execution occur at the OPEN of day $t+1$. The signal output is indexed to date $t$ without applying any forward-looking shifts inside the calculation.\n- Minimum Trailing Observations: A minimum of $min\\_obs = 20$ trailing trading days is required for a symbol before a valid signal is produced.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_ret=3, N_vol=20, min_obs=20):\n    close = df[\"close\"]\n    returns = df[\"returns\"]\n\n    close_lagged = df.groupby(level=\"symbol\")[\"close\"].shift(N_ret)\n    R = (close / close_lagged) - 1.0\n\n    sigma = df.groupby(level=\"symbol\")[\"returns\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=min_obs).std(ddof=1)\n    )\n\n    denom = sigma * np.sqrt(N_ret)\n    denom = denom.replace(0.0, np.nan)\n    S = R / denom\n\n    cs_mean = S.groupby(level=\"date\").transform(\"mean\")\n    cs_std = S.groupby(level=\"date\").transform(lambda x: x.std(ddof=1))\n    cs_std = cs_std.replace(0.0, np.nan)\n\n    Z = (S - cs_mean) / cs_std\n    alpha = -Z\n\n    return alpha\n```",
+    "response_sha256": "f5c6a3a8f8f2fb3a19362fff5a8304f2162e9e6d82d4bbf7cf73e74bb6b94098",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_ret",
+            "N_vol",
+            "min_obs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 544188757,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1271,
+            "total_tokens": 6734
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

@@ -1,0 +1,74 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_d8be488a",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 544188757,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_smooth"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-25T08:32:58.227038+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 5,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volume-Weighted Intraday Pressure Anomaly (VWIPA)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_vol = 20`: Rolling window size for volume baseline and signal volatility calculation\n  - `N_smooth = 5`: Rolling window size for smoothing daily pressure signal\n- Required Inputs: `high`, `low`, `close`, `volume`\n\n# Section 2: Mathematical Formulation\n\nFor each symbol $i$ on date $t$:\n\n1. Intraday Close Location Value ($CLV_{i,t}$):\n$$CLV_{i,t} = \\begin{cases} \\frac{2 \\cdot C_{i,t} - H_{i,t} - L_{i,t}}{H_{i,t} - L_{i,t}} & \\text{if } H_{i,t} > L_{i,t} \\\\ 0 & \\text{if } H_{i,t} = L_{i,t} \\end{cases}$$\n\n2. Relative Volume Ratio ($RVR_{i,t}$):\n$$\\bar{V}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} V_{i,t-k}$$\n\n$$RVR_{i,t} = \\begin{cases} \\frac{V_{i,t}}{\\bar{V}_{i,t}} & \\text{if } \\bar{V}_{i,t} > 0 \\\\ 0 & \\text{if } \\bar{V}_{i,t} = 0 \\end{cases}$$\n\n3. Daily Volume-Weighted Pressure ($P_{i,t}$):\n$$P_{i,t} = CLV_{i,t} \\times RVR_{i,t}$$\n\n4. Smoothed Pressure ($SP_{i,t}$):\n$$SP_{i,t} = \\frac{1}{N_{smooth}} \\sum_{k=0}^{N_{smooth}-1} P_{i,t-k}$$\n\n5. Time-Series Standardized Signal ($S_{i,t}$):\n$$\\mu_{P, i, t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} P_{i,t-k}$$\n\n$$\\sigma_{P, i, t} = \\sqrt{\\frac{1}{N_{vol}-1} \\sum_{k=0}^{N_{vol}-1} \\left(P_{i,t-k} - \\mu_{P, i, t}\\right)^2}$$\n\n$$S_{i,t} = \\begin{cases} \\frac{SP_{i,t}}{\\sigma_{P, i, t}} & \\text{if } \\sigma_{P, i, t} > 0 \\\\ 0 & \\text{if } \\sigma_{P, i, t} = 0 \\end{cases}$$\n\n6. Cross-Sectional Z-score Alpha ($\\alpha_{i,t}$):\nLet $M_t$ be the count of non-NaN values of $S_{i,t}$ across all symbols on date $t$.\n$$\\mu_{CS, t} = \\frac{1}{M_t} \\sum_{j=1}^{M_t} S_{j,t}$$\n\n$$\\sigma_{CS, t} = \\sqrt{\\frac{1}{M_t - 1} \\sum_{j=1}^{M_t} \\left(S_{j,t} - \\mu_{CS, t}\\right)^2}$$\n\n$$\\alpha_{i,t} = \\begin{cases} \\frac{S_{i,t} - \\mu_{CS, t}}{\\sigma_{CS, t}} & \\text{if } \\sigma_{CS, t} > 0 \\text{ and } M_t > 1 \\text{ and } S_{i,t} \\text{ is defined} \\\\ 0 & \\text{if } \\sigma_{CS, t} = 0 \\text{ and } M_t > 1 \\text{ and } S_{i,t} \\text{ is defined} \\\\ \\text{NaN} & \\text{if } S_{i,t} \\text{ is missing (NaN)} \\end{cases}$$\n\nHandling of minimum observations, zero denominators, and missing values:\n- Rolling window operations require a minimum number of valid observations equal to the lookback parameter (`N_vol` or `N_smooth`). If fewer valid observations exist in the trailing window, the output evaluates to NaN.\n- Zero denominators in $CLV_{i,t}$, $RVR_{i,t}$, $S_{i,t}$, and $\\alpha_{i,t}$ evaluate strictly to $0$ as defined above.\n- Missing observations (NaNs) propagate through time-series calculations and are ignored in cross-sectional statistics calculations. If $S_{i,t}$ is NaN, $\\alpha_{i,t}$ is output as NaN.\n\n# Section 3: Causal Rationale\n\nThe signal measures persistent, volume-backed directional pressure by combining intraday price location relative to the daily high-low range with relative volume expansion. Intraday price location ($CLV$) acts as an observable proxy for intraday buying or selling dominance, while relative trading volume ($RVR$) reflects the magnitude of market liquidity consumed during the session. Weighting price location by relative volume isolates sessions where institutional participants execute aggressive order flow, distinguishing high-conviction accumulation or distribution from low-volume noise. Normalizing the smoothed signal by its historical volatility provides cross-sectional comparability, allowing the strategy to go long stocks exhibiting sustained institutional accumulation and short stocks experiencing persistent distribution.\n\n# Section 4: Structural Bounds\n\n- Point-in-Time Confirmation: The strategy relies strictly on Point-in-Time daily OHLCV market data.\n- Execution Timing Rule: The signal $\\alpha_{i,t}$ is constructed using price and volume data available up to the market close on day $t$. Execution occurs at the market OPEN on day $t+1$. The mathematical formulation and Python code generate values indexed to date $t$ without future look-ahead bias.\n- Minimum Observations Required: A symbol requires at least `N_vol` trailing daily observations before the primary rolling inputs can be computed, and a total of `N_vol + N_smooth - 1` observations (24 days with default parameters) before the final signal becomes fully defined.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_vol=20, N_smooth=5):\n    # 1. Intraday Close Location Value (CLV)\n    hl_range = df[\"high\"] - df[\"low\"]\n    clv = (2.0 * df[\"close\"] - df[\"high\"] - df[\"low\"]) / hl_range\n    clv = clv.where(hl_range > 0.0, 0.0)\n\n    # 2. Relative Volume Ratio (RVR)\n    vol_ma = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n    rvr = df[\"volume\"] / vol_ma\n    rvr = rvr.where(vol_ma > 0.0, 0.0)\n\n    # 3. Daily Volume-Weighted Pressure (P)\n    p = clv * rvr\n\n    # 4. Smoothed Pressure (SP)\n    sp = p.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    # 5. Time-Series Volatility of Pressure\n    p_std = p.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n\n    # 6. Standardized Signal (S)\n    s = sp / p_std\n    s = s.where(p_std > 0.0, 0.0)\n\n    # Preserve NaN where input rolling windows were insufficient\n    s = s.where(sp.notna() & p_std.notna(), np.nan)\n\n    # 7. Cross-Sectional Z-score\n    cs_mean = s.groupby(level=\"date\").transform(\"mean\")\n    cs_std = s.groupby(level=\"date\").transform(\"std\")\n    cs_count = s.groupby(level=\"date\").transform(\"count\")\n\n    alpha = (s - cs_mean) / cs_std\n    alpha = alpha.where((cs_std > 0.0) & (cs_count > 1), 0.0)\n    alpha = alpha.where(s.notna(), np.nan)\n\n    return alpha\n```",
+    "response_sha256": "a06a56b9e18bdfc1d42ddaad5bca3fb123b64d3b6127a21b9074624e4c750522",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 544188757,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1030,
+            "output_tokens": 1989,
+            "total_tokens": 8530
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

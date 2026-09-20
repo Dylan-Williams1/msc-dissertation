@@ -1,0 +1,109 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_50b8603e",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_min_high",
+            "N_vol",
+            "N_vol_short",
+            "N_min_vol",
+            "N_rev",
+            "N_smooth",
+            "w_prox",
+            "w_conf",
+            "w_rev",
+            "eps"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-20T23:47:28.941593+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 18,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1321039729,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Confirmed 52-Week High Proximity with Short-Horizon Overextension Filter (VC-52HP)\n- **Holding Period:** 20 trading days (signal recomputed daily; positions rebalanced daily against a 20-day expected turnover horizon)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral\n- **Parameters:**\n  - `N_high = 252` \u2014 lookback window (trading days) defining the 52-week high/low range\n  - `N_min_high = 200` \u2014 minimum observations required inside the 52-week window\n  - `N_vol = 60` \u2014 lookback for average dollar-volume baseline\n  - `N_vol_short = 5` \u2014 short window for recent dollar-volume\n  - `N_min_vol = 40` \u2014 minimum observations required for the dollar-volume baseline\n  - `N_rev = 5` \u2014 short-horizon reversal (overextension) window\n  - `N_smooth = 3` \u2014 smoothing window applied to the final composite score\n  - `w_prox = 1.0` \u2014 weight on the 52-week-high proximity leg\n  - `w_conf = 0.35` \u2014 weight on the volume-confirmation leg\n  - `w_rev = 0.30` \u2014 weight on the short-horizon overextension leg\n  - `eps = 1e-12` \u2014 numerical floor used to avoid division by zero\n- **Required Inputs:** `high`, `low`, `close`, `volume` (daily, point-in-time). `open` and `returns` are not used.\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use data through the close of day $t$ only.\n\n**Step 1 \u2014 52-week range position (proximity to the 52-week high).**\n\n$$\nH_{i,t} = \\max_{s \\in [t-N_{high}+1,\\; t]} high_{i,s}, \\qquad\nL_{i,t} = \\min_{s \\in [t-N_{high}+1,\\; t]} low_{i,s}\n$$\n\nBoth rolling extrema require at least `N_min_high` non-missing observations in the window; otherwise they are undefined (NaN).\n\n$$\nP_{i,t} = \\frac{close_{i,t} - L_{i,t}}{\\max\\left(H_{i,t} - L_{i,t},\\; \\varepsilon\\right)}, \\qquad \\varepsilon = \\texttt{eps}\n$$\n\n$P_{i,t} \\in [0,1]$ up to the $\\varepsilon$ floor; $P=1$ means the close sits at the 52-week high, $P=0$ at the 52-week low. The $\\max(\\cdot,\\varepsilon)$ operation is the sole division-by-zero treatment (relevant only for a degenerate flat-price window).\n\n**Step 2 \u2014 Volume confirmation.**\n\nDollar volume: $DV_{i,t} = close_{i,t}\\cdot volume_{i,t}$.\n\n$$\nV^{s}_{i,t} = \\frac{1}{N_{vol\\_short}}\\sum_{k=0}^{N_{vol\\_short}-1} DV_{i,t-k}, \\qquad\nV^{l}_{i,t} = \\frac{1}{N_{vol}}\\sum_{k=0}^{N_{vol}-1} DV_{i,t-k}\n$$\n\n$V^{s}$ requires all `N_vol_short` observations; $V^{l}$ requires at least `N_min_vol` observations, else NaN.\n\n$$\nC_{i,t} = \\ln\\!\\left(\\frac{\\max\\left(V^{s}_{i,t},\\;\\varepsilon\\right)}{\\max\\left(V^{l}_{i,t},\\;\\varepsilon\\right)}\\right)\n$$\n\n**Step 3 \u2014 Short-horizon overextension.**\n\n$$\nR_{i,t} = \\ln\\!\\left(\\frac{close_{i,t}}{close_{i,t-N_{rev}}}\\right)\n$$\n\nrequiring `N_rev + 1` observations.\n\n**Step 4 \u2014 Cross-sectional normalisation.**\n\nFor any raw variable $X$, define the cross-sectional rank-based z-score on date $t$ over the set $\\mathcal{S}_t$ of symbols with $X_{i,t}$ defined, $n_t = |\\mathcal{S}_t|$:\n\n$$\n\\widetilde{X}_{i,t} = \\frac{\\operatorname{rank}(X_{i,t}) - \\tfrac{n_t+1}{2}}{\\max\\!\\left(\\sigma\\!\\left[\\operatorname{rank}(X_{\\cdot,t})\\right],\\;\\varepsilon\\right)}\n$$\n\nwhere $\\operatorname{rank}$ is the average-tie ascending rank over $\\mathcal{S}_t$ and $\\sigma[\\cdot]$ is the cross-sectional standard deviation of those ranks on date $t$. Symbols with $X_{i,t}$ undefined receive $\\widetilde{X}_{i,t}=$ NaN.\n\nApply this to obtain $\\widetilde{P}_{i,t}$, $\\widetilde{C}_{i,t}$, $\\widetilde{R}_{i,t}$.\n\n**Step 5 \u2014 Composite score.**\n\n$$\nS_{i,t} = w_{prox}\\,\\widetilde{P}_{i,t} \\;+\\; w_{conf}\\,\\left(\\widetilde{P}_{i,t}\\cdot \\widetilde{C}_{i,t}\\right)\\Big/ \\max\\left(\\sigma_t\\!\\left[\\widetilde{P}\\cdot\\widetilde{C}\\right],\\varepsilon\\right) \\;-\\; w_{rev}\\,\\widetilde{R}_{i,t}\n$$\n\nwhere $\\sigma_t[\\cdot]$ is the cross-sectional standard deviation on date $t$ of the interaction term, computed over symbols where it is defined. $S_{i,t}$ is defined only where all three normalised components are defined.\n\n**Step 6 \u2014 Temporal smoothing.**\n\n$$\n\\bar{S}_{i,t} = \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} S_{i,t-k}\n$$\n\nrequiring all `N_smooth` observations.\n\n**Step 7 \u2014 Final cross-sectional standardisation (dollar-neutral scaling).**\n\n$$\nA_{i,t} = \\frac{\\bar{S}_{i,t} - \\mu_t\\!\\left[\\bar{S}\\right]}{\\max\\left(\\sigma_t\\!\\left[\\bar{S}\\right],\\;\\varepsilon\\right)}\n$$\n\n$A_{i,t}$ is the alpha signal known at the close of day $t$.\n\n**Missing-value handling (explicit):** rolling windows use the stated minimum observation counts; where a minimum is not met the value is NaN and propagates. No imputation, filling, or winsorisation is performed. Division-by-zero is handled only by the $\\max(\\cdot,\\varepsilon)$ floors stated above. Cross-sectional moments are computed over available (non-NaN) symbols on each date.\n\n# Section 3: Causal Rationale\n\nThe 52-week high is a salient, widely published reference price, and the distance of the current close from it acts as an anchor: when a stock trades near this anchor, holders are reluctant to bid it further up on good news, so positive information is impounded gradually rather than instantly, producing continued drift. Conversely, stocks near the bottom of their 52-week range face anchoring in the opposite direction, with bad news underreacted to. The range-position variable $P$ is a purely price-observable encoding of this anchor, using only the trailing 252-day high/low envelope of daily highs, lows and closes. Volume confirmation ($C$, recent dollar volume relative to its 60-day baseline) is used as an observable proxy for the intensity of information arrival \u2014 advances toward the anchor accompanied by expanding traded value are more likely to reflect news being processed than thin, mechanical drift \u2014 so it is applied multiplicatively to sharpen, not replace, the anchoring signal. The short-horizon return term $R$ is subtracted because prices that have just jumped in the last five days are prone to microstructure and liquidity-provision reversal, which contaminates a slow-moving anchoring signal; removing it isolates persistent range position from transient overextension. Smoothing over three days and cross-sectional standardisation control for day-specific noise and keep the resulting book dollar-neutral.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses only point-in-time daily OHLCV fields (`high`, `low`, `close`, `volume`). No fundamental, analyst, index-membership, or restated data is used. No survivorship-adjusted or forward-filled corporate-action-aware series beyond standard split/dividend-adjusted PIT prices is assumed. All inputs are as-reported at the close of day $t$.\n- **Execution timing:** The signal for date $t$ is constructed exclusively from data available up to and including the market close of day $t$, and is executed at the **OPEN of day $t+1$**. The formulation complies: every rolling and cross-sectional operation at row $t$ references only observations at index $\\le t$; no negative shifts are used and `open` is never an input.\n- **Minimum trailing observations:** The binding requirement is `N_min_high = 200` observations for the 52-week range, plus `N_rev = 5` for the reversal term and `N_smooth - 1 = 2` additional days for smoothing. A symbol therefore requires a minimum of **202 trailing daily observations** before the signal is defined, and in practice at least 200 valid observations must fall within the trailing 252-day window.\n- **Universe constraints:** Should be applied to liquid, continuously traded common equities; symbols with zero or missing volume produce NaN dollar-volume ratios and are naturally excluded on those dates. The signal is undefined for newly listed symbols until the observation minimum is met.\n- **Capacity/turnover:** Expected holding horizon is approximately 20 days; the three-day smoothing bounds daily turnover. No leverage, shorting-cost, or borrow-availability assumptions are embedded in the signal itself.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_high=252,\n                   N_min_high=200,\n                   N_vol=60,\n                   N_vol_short=5,\n                   N_min_vol=40,\n                   N_rev=5,\n                   N_smooth=3,\n                   w_prox=1.0,\n                   w_conf=0.35,\n                   w_rev=0.30,\n                   eps=1e-12):\n\n    data = df.sort_index()\n    g = data.groupby(level='symbol')\n\n    roll_high = g['high'].transform(\n        lambda s: s.rolling(N_high, min_periods=N_min_high).max())\n    roll_low = g['low'].transform(\n        lambda s: s.rolling(N_high, min_periods=N_min_high).min())\n\n    rng = (roll_high - roll_low).where(lambda x: x > eps, eps)\n    P = (data['close'] - roll_low) / rng\n\n    dv = data['close'] * data['volume']\n    dv_g = dv.groupby(level='symbol')\n    v_short = dv_g.transform(\n        lambda s: s.rolling(N_vol_short, min_periods=N_vol_short).mean())\n    v_long = dv_g.transform(\n        lambda s: s.rolling(N_vol, min_periods=N_min_vol).mean())\n    C = np.log(v_short.where(v_short > eps, eps) / v_long.where(v_long > eps, eps))\n\n    close_lag = g['close'].shift(N_rev)\n    R = np.log(data['close'] / close_lag)\n\n    raw = pd.DataFrame({'P': P, 'C': C, 'R': R}, index=data.index)\n\n    z = {}\n    for col in ['P', 'C', 'R']:\n        r = raw[col].groupby(level='date').rank(method='average')\n        r_mean = r.groupby(level='date').transform('mean')\n        r_std = r.groupby(level='date').transform('std')\n        z[col] = (r - r_mean) / r_std.where(r_std > eps, eps)\n\n    zP, zC, zR = z['P'], z['C'], z['R']\n\n    inter = zP * zC\n    inter_std = inter.groupby(level='date').transform('std')\n    inter_scaled = inter / inter_std.where(inter_std > eps, eps)\n\n    S = w_prox * zP + w_conf * inter_scaled - w_rev * zR\n\n    S_smooth = S.groupby(level='symbol').transform(\n        lambda s: s.rolling(N_smooth, min_periods=N_smooth).mean())\n\n    m = S_smooth.groupby(level='date').transform('mean')\n    sd = S_smooth.groupby(level='date').transform('std')\n    alpha = (S_smooth - m) / sd.where(sd > eps, eps)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha_vc52hp'\n    return alpha\n```",
+    "response_sha256": "82d2ad7279d6657ae20438c4aa797a71f4246e4c49045f4b3b7b79cc90f146ea",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_min_high",
+            "N_vol",
+            "N_vol_short",
+            "N_min_vol",
+            "N_rev",
+            "N_smooth",
+            "w_prox",
+            "w_conf",
+            "w_rev",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1631,
+            "output_tokens": 4442,
+            "total_tokens": 6073
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

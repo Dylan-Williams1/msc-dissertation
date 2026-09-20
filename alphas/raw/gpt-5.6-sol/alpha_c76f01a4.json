@@ -1,0 +1,100 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_c76f01a4",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_beta",
+            "N_shock",
+            "N_mkt",
+            "N_xs"
+        ],
+        "theme": "beta",
+        "theme_title": "beta",
+        "timestamp_utc": "2026-08-21T00:29:07.884787+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 23,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2139514762,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7071d5841a2ec076e3396e706fbbfd178c2b6f47088be172f9dffe47176407ab",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Beta-Scaled Market-Move Reversal\n- **Holding Period:** 1 trading day\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_beta = 60`: rolling observations used to estimate beta; must be at least 2\n  - `N_shock = 5`: market-return aggregation window; must be at least 1\n  - `N_mkt = 20`: minimum valid symbol returns required to calculate the daily market proxy; must be at least 1\n  - `N_xs = 20`: minimum valid exposures required for cross-sectional ranking; must be at least 2\n- **Required Inputs:** `returns`\n\n## Section 2: Mathematical Formulation\n\nLet \\(r_{i,t}\\) denote the supplied daily return for symbol \\(i\\) on date \\(t\\). Let \\(\\mathcal I_t\\) be the set of symbols with non-missing returns on date \\(t\\), and let \\(n_t=|\\mathcal I_t|\\).\n\nDefine the point-in-time equal-weighted market proxy:\n\n\\[\nr_{m,t}=\n\\begin{cases}\n\\displaystyle \\frac{1}{n_t}\\sum_{i\\in\\mathcal I_t}r_{i,t},\n& n_t\\geq N_{\\mathrm{mkt}},\\\\[6pt]\n\\mathrm{NaN}, & n_t<N_{\\mathrm{mkt}}.\n\\end{cases}\n\\]\n\nFor each symbol-date pair, let \\(\\mathcal W_{i,t}\\) contain the most recent \\(N_{\\mathrm{beta}}\\) observations for symbol \\(i\\), including date \\(t\\). Beta is defined only if all \\(N_{\\mathrm{beta}}\\) corresponding pairs \\((r_{i,u},r_{m,u})\\) are valid. Define:\n\n\\[\n\\bar r_{i,t}\n=\n\\frac{1}{N_{\\mathrm{beta}}}\n\\sum_{u\\in\\mathcal W_{i,t}}r_{i,u},\n\\qquad\n\\bar r_{m,i,t}\n=\n\\frac{1}{N_{\\mathrm{beta}}}\n\\sum_{u\\in\\mathcal W_{i,t}}r_{m,u}.\n\\]\n\nThe rolling beta is:\n\n\\[\n\\beta_{i,t}\n=\n\\frac{\n\\sum_{u\\in\\mathcal W_{i,t}}\n(r_{i,u}-\\bar r_{i,t})(r_{m,u}-\\bar r_{m,i,t})\n}{\n\\sum_{u\\in\\mathcal W_{i,t}}\n(r_{m,u}-\\bar r_{m,i,t})^2\n}.\n\\]\n\nEquivalently, the implementation uses the centered-sum form:\n\n\\[\n\\beta_{i,t}\n=\n\\frac{\n\\sum r_{i,u}r_{m,u}\n-\n\\frac{\n\\left(\\sum r_{i,u}\\right)\n\\left(\\sum r_{m,u}\\right)\n}{N_{\\mathrm{beta}}}\n}{\n\\sum r_{m,u}^2\n-\n\\frac{\n\\left(\\sum r_{m,u}\\right)^2\n}{N_{\\mathrm{beta}}}\n}.\n\\]\n\nIf the denominator is non-positive, \\(\\beta_{i,t}\\) is undefined.\n\nDefine the recent cumulative market shock over the latest \\(N_{\\mathrm{shock}}\\) dates:\n\n\\[\nM_t\n=\n\\sum_{k=0}^{N_{\\mathrm{shock}}-1}r_{m,t-k}.\n\\]\n\nThe shock is undefined unless all \\(N_{\\mathrm{shock}}\\) market-proxy returns are valid. The beta-scaled systematic-move exposure is:\n\n\\[\nq_{i,t}=\\beta_{i,t}M_t.\n\\]\n\nFor each date \\(t\\), let \\(n_t^q\\) be the number of valid \\(q_{i,t}\\) observations and let \\(R_{i,t}\\) be the ascending cross-sectional rank of \\(q_{i,t}\\), with average ranks assigned to ties. The alpha is:\n\n\\[\n\\alpha_{i,t}\n=\n1\n-\n2\\frac{R_{i,t}-1}{n_t^q-1},\n\\qquad n_t^q\\geq N_{\\mathrm{xs}}.\n\\]\n\nThus, the smallest beta-scaled market exposure receives the largest long signal and the largest exposure receives the largest short signal. If \\(n_t^q<N_{\\mathrm{xs}}\\), the signal is undefined.\n\nMissing observations are not imputed. A missing return invalidates any rolling beta window containing it; an invalid market proxy invalidates beta and market-shock windows containing it. Division by a non-positive beta denominator produces an undefined signal. No clipping or infinity replacement is performed.\n\n## Section 3: Causal Rationale\n\nRolling beta measures each stock\u2019s observed return sensitivity to the equal-weighted market return derived from the available daily return panel. The product of beta and the recent market move identifies stocks expected to have experienced the largest systematic price response to that move. If part of a beta-amplified broad-market move is temporary, its cross-sectional component should partially reverse, making high-beta stocks short candidates after market advances and long candidates after market declines. The construction uses the observable beta-scaled return response as the proxy for this temporary systematic overreaction.\n\n## Section 4: Structural Bounds\n\nThe strategy relies solely on Point-in-Time (PIT) daily OHLCV data, specifically the supplied PIT `returns` field; the market proxy uses only symbols and returns available on each date.\n\nThe signal is generated after the market close on day \\(t\\), using data available up to and including that close, and is executed at the open of day \\(t+1\\). The formulation complies with this rule, and the implementation returns the signal aligned to day \\(t\\) without applying an execution lag.\n\nA symbol requires at least `N_beta = 60` trailing observations before its beta can be defined. All 60 symbol returns and corresponding qualifying market-proxy returns must be valid. The current date must also have `N_shock = 5` valid trailing market-proxy returns, and at least `N_xs = 20` valid cross-sectional exposures must exist before the final signal is defined.\n\n## Section 5: Python Implementation\n\n```python\nimport pandas as pd\n\ndef generate_alpha(\n    df,\n    N_beta=60,\n    N_shock=5,\n    N_mkt=20,\n    N_xs=20\n):\n    if N_beta < 2:\n        raise ValueError(\"N_beta must be at least 2\")\n    if N_shock < 1:\n        raise ValueError(\"N_shock must be at least 1\")\n    if N_mkt < 1:\n        raise ValueError(\"N_mkt must be at least 1\")\n    if N_xs < 2:\n        raise ValueError(\"N_xs must be at least 2\")\n\n    original_index = df.index\n    x = df.sort_index(level=[\"date\", \"symbol\"]).copy()\n    r = x[\"returns\"]\n\n    market_count = r.groupby(level=\"date\").count()\n    market_return = r.groupby(level=\"date\").mean()\n    market_return = market_return.where(market_count >= N_mkt)\n\n    row_dates = x.index.get_level_values(\"date\")\n    market_by_row = pd.Series(\n        market_return.reindex(row_dates).to_numpy(),\n        index=x.index\n    )\n\n    x[\"_r_pair\"] = r.where(market_by_row.notna())\n    x[\"_m_pair\"] = market_by_row.where(r.notna())\n    x[\"_rm_pair\"] = x[\"_r_pair\"] * x[\"_m_pair\"]\n    x[\"_mm_pair\"] = x[\"_m_pair\"] * x[\"_m_pair\"]\n\n    grouped = x.groupby(level=\"symbol\", sort=False)\n\n    sum_r = (\n        grouped[\"_r_pair\"]\n        .rolling(window=N_beta, min_periods=N_beta)\n        .sum()\n        .droplevel(0)\n        .reindex(x.index)\n    )\n    sum_m = (\n        grouped[\"_m_pair\"]\n        .rolling(window=N_beta, min_periods=N_beta)\n        .sum()\n        .droplevel(0)\n        .reindex(x.index)\n    )\n    sum_rm = (\n        grouped[\"_rm_pair\"]\n        .rolling(window=N_beta, min_periods=N_beta)\n        .sum()\n        .droplevel(0)\n        .reindex(x.index)\n    )\n    sum_mm = (\n        grouped[\"_mm_pair\"]\n        .rolling(window=N_beta, min_periods=N_beta)\n        .sum()\n        .droplevel(0)\n        .reindex(x.index)\n    )\n\n    beta_numerator = sum_rm - (sum_r * sum_m / N_beta)\n    beta_denominator = sum_mm - (sum_m * sum_m / N_beta)\n    beta = beta_numerator.div(beta_denominator.where(beta_denominator > 0))\n\n    market_shock = market_return.rolling(\n        window=N_shock,\n        min_periods=N_shock\n    ).sum()\n\n    shock_by_row = pd.Series(\n        market_shock.reindex(row_dates).to_numpy(),\n        index=x.index\n    )\n\n    exposure = beta * shock_by_row\n    exposure_rank = exposure.groupby(level=\"date\").rank(method=\"average\")\n    exposure_count = exposure.groupby(level=\"date\").transform(\"count\")\n\n    alpha = 1 - 2 * (\n        (exposure_rank - 1) / (exposure_count - 1)\n    )\n    alpha = alpha.where(exposure_count >= N_xs)\n    alpha = alpha.reindex(original_index)\n    alpha.name = \"alpha\"\n\n    return alpha\n```",
+    "response_sha256": "1085837b041987ee4ea5262a3a5635468d39a94aa1556fd072b73435e2a656c0",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_beta",
+            "N_shock",
+            "N_mkt",
+            "N_xs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 5665,
+            "total_tokens": 6661
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

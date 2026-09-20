@@ -1,0 +1,77 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_f0d9f6b4",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1230285834,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_lookback",
+            "N_skip"
+        ],
+        "theme": "long_term_reversal",
+        "theme_title": "long-term reversal",
+        "timestamp_utc": "2026-08-24T18:33:25.453434+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 7,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7897b46d025c1a57d269c5acaac1ce9fa9e52fb1c4a5361f680638372ce114a9",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volatility_Adjusted_Long_Term_Reversal\n- Holding Period: 21 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_lookback = 252`: Trailing window in trading days for multi-month return and volatility assessment (approx. 1 trading year).\n  - `N_skip = 21`: Short-term window in trading days omitted from long-term return to avoid short-term momentum and microstructure effects (approx. 1 trading month).\n- Required Inputs: `close`, `returns`\n\n# Section 2: Mathematical Formulation\nLet $C_{i, t}$ denote the closing price of symbol $i$ on trading day $t$, and $r_{i, t}$ denote the daily return of symbol $i$ on day $t$.\n\n1. **Lagged Price Calculation**:\n   Retrieve the closing prices lagged by $N_{skip}$ and $N_{lookback}$ days:\n   $$C_{i, t - N_{skip}} = \\text{shift}(C_{i, t}, N_{skip})$$\n   $$C_{i, t - N_{lookback}} = \\text{shift}(C_{i, t}, N_{lookback})$$\n\n2. **Long-Term Return Signal**:\n   Compute the long-term cumulative return excluding the most recent $N_{skip}$ days:\n   $$R_{i, t}^{(L)} = \\frac{C_{i, t - N_{skip}}}{C_{i, t - N_{lookback}}} - 1$$\n   If $C_{i, t - N_{lookback}} \\le 0$ or if either lagged price is missing, $R_{i, t}^{(L)}$ is undefined ($\\text{NaN}$).\n\n3. **Trailing Daily Return Volatility**:\n   Compute the sample standard deviation of daily returns over the $N_{lookback}$ window:\n   $$\\sigma_{i, t} = \\sqrt{\\frac{1}{N_{lookback} - 1} \\sum_{\\tau = t - N_{lookback} + 1}^{t} (r_{i, \\tau} - \\bar{r}_{i, t})^2}$$\n   where $\\bar{r}_{i, t} = \\frac{1}{N_{lookback}} \\sum_{\\tau = t - N_{lookback} + 1}^{t} r_{i, \\tau}$.\n   A minimum observation count of $N_{lookback}$ non-null daily returns is required. If fewer observations exist or if $\\sigma_{i, t} = 0$, $\\sigma_{i, t}$ is set to undefined ($\\text{NaN}$).\n\n4. **Volatility-Adjusted Cumulative Performance**:\n   Scale the cumulative return by the annualized daily volatility over the effective horizon:\n   $$S_{i, t} = \\frac{R_{i, t}^{(L)}}{\\sigma_{i, t} \\cdot \\sqrt{N_{lookback} - N_{skip}}}$$\n   If $R_{i, t}^{(L)}$ or $\\sigma_{i, t}$ is undefined, or if division by zero occurs, $S_{i, t}$ is set to $\\text{NaN}$.\n\n5. **Cross-Sectional Reversal Z-Score**:\n   Invert the signal to capture long-term reversal and calculate the cross-sectional Z-score on each date $t$:\n   $$\\mu_t(S) = \\frac{1}{M_t} \\sum_{i \\in \\mathcal{I}_t} S_{i, t}$$\n   $$\\sigma_t(S) = \\sqrt{\\frac{1}{M_t - 1} \\sum_{i \\in \\mathcal{I}_t} (S_{i, t} - \\mu_t(S))^2}$$\n   $$\\alpha_{i, t} = -\\frac{S_{i, t} - \\mu_t(S)}{\\sigma_t(S)}$$\n   where $\\mathcal{I}_t$ is the set of symbols with valid non-$\\text{NaN}$ values of $S_{i, t}$ on date $t$, and $M_t = |\\mathcal{I}_t|$.\n   If $M_t < 2$ or $\\sigma_t(S) = 0$, $\\alpha_{i, t} = \\text{NaN}$ for all $i$ on date $t$. Undefined values are preserved as $\\text{NaN}$ without implicit imputation.\n\n# Section 3: Causal Rationale\nLong-term price reversal is driven by behavioral overreaction to multi-month news streams, pushing asset prices systematically away from intrinsic values. Investors tend to over-extrapolate trailing 12-month performance, causing past underperformers to become deeply undervalued and past outperformers to become overvalued. Bypassing the immediate prior 21 trading days isolates this long-horizon mispricing from short-term momentum and bid-ask spread recovery effects. Adjusting long-term performance by trailing daily volatility standardizes the mispricing metric across stocks with differing baseline risk levels, ensuring the alpha targets true statistical overextension rather than uncompensated volatility.\n\n# Section 4: Structural Bounds\n- **Point-in-Time Data**: The formulation relies strictly on Point-in-Time daily OHLCV market data.\n- **Execution Timing Rule**: Signal $\\alpha_{i, t}$ is computed using market data available up to the market close on day $t$. Trades are executed at the OPEN of day $t+1$. The formulation contains no forward-looking shifts or future data leaks.\n- **Minimum Trailing Window**: A minimum of $N_{lookback} + 1 = 253$ trading days of continuous historical observation is required before a valid signal can be generated for any symbol.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_lookback=252, N_skip=21):\n    # Step 1: Lagged Close Prices\n    close_skip = df.groupby(level=\"symbol\")[\"close\"].shift(N_skip)\n    close_lookback = df.groupby(level=\"symbol\")[\"close\"].shift(N_lookback)\n\n    # Step 2: Long-Term Horizon Return\n    ret_long = (close_skip / close_lookback) - 1.0\n    ret_long = ret_long.where(close_lookback > 0, np.nan)\n\n    # Step 3: Rolling Volatility over N_lookback window\n    vol = df.groupby(level=\"symbol\")[\"returns\"].transform(\n        lambda x: x.rolling(window=N_lookback, min_periods=N_lookback).std()\n    )\n    vol = vol.replace(0, np.nan)\n\n    # Step 4: Volatility-Adjusted Cumulative Performance\n    horizon_factor = np.sqrt(N_lookback - N_skip)\n    s = ret_long / (vol * horizon_factor)\n    s = s.replace([np.inf, -np.inf], np.nan)\n\n    # Step 5: Cross-Sectional Z-Score of Inverted Signal\n    mean_t = s.groupby(level=\"date\").transform(\"mean\")\n    std_t = s.groupby(level=\"date\").transform(\"std\")\n    std_t = std_t.replace(0, np.nan)\n\n    alpha = -(s - mean_t) / std_t\n    alpha = alpha.replace([np.inf, -np.inf], np.nan)\n\n    return alpha\n```",
+    "response_sha256": "4ae208c44168711016dbec393331a47bb111a8a58d4fec2c90790447982b75d7",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_lookback",
+            "N_skip"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1230285834,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1032,
+            "output_tokens": 1682,
+            "total_tokens": 8054
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

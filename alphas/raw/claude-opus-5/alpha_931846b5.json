@@ -1,0 +1,111 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_931846b5",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_high_min",
+            "N_persist",
+            "theta",
+            "N_rev",
+            "N_smooth",
+            "C_clip",
+            "w_prox",
+            "w_pers",
+            "w_rev"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-20T23:48:37.828316+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 19,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1632517261,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Persistent 52-Week High Proximity, Short-Horizon-Reversal Adjusted (P52-PRA)\n- **Holding Period:** 20 trading days (signal recomputed daily; positions rebalanced toward the current signal each day)\n- **Orientation:** Long/Short, cross-sectional, dollar-neutral by construction of the final cross-sectional z-score\n- **Parameters:**\n  - `N_high = 252` (lookback window, in trading days, for the trailing high anchor)\n  - `N_high_min = 200` (minimum observations required within the `N_high` window)\n  - `N_persist = 21` (window over which nearness-to-high persistence is measured)\n  - `theta = 0.05` (proportional distance below the running trailing high that still counts as \"near\")\n  - `N_rev = 5` (short-horizon reversal window, in trading days)\n  - `N_smooth = 5` (rolling smoothing window applied to the composite score)\n  - `C_clip = 3.0` (winsorisation bound applied to cross-sectional z-scores)\n  - `w_prox = 1.0` (weight on the proximity component)\n  - `w_pers = 0.5` (weight on the persistence component)\n  - `w_rev = 0.5` (weight subtracted for the short-horizon reversal component)\n- **Required Inputs:** `high`, `close`, `returns` (all daily, point-in-time OHLCV-derived)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities at date $t$ use data up to and including the close of day $t$.\n\n**Step 1 \u2014 Trailing 52-week high anchor.**\n$$H_{i,t} = \\max_{s \\in [t-N_{high}+1,\\; t]} \\text{high}_{i,s}$$\ncomputed over the trailing window of length `N_high`, requiring at least `N_high_min` non-missing observations in that window; otherwise $H_{i,t}$ is undefined (NaN).\n\n**Step 2 \u2014 Proximity to the trailing high.**\n$$P_{i,t} = \\frac{\\text{close}_{i,t}}{H_{i,t}}, \\qquad H_{i,t} > 0$$\nIf $H_{i,t} \\le 0$ or $H_{i,t}$ is undefined, $P_{i,t}$ is undefined (NaN). $P_{i,t}\\in(0,1]$ for well-formed price data.\n\n**Step 3 \u2014 Persistence of nearness.** Define the daily indicator\n$$\\iota_{i,s} = \\mathbf{1}\\!\\left\\{ \\text{close}_{i,s} \\ge (1-\\theta)\\, H_{i,s} \\right\\},$$\ndefined only where $H_{i,s}$ is defined (otherwise undefined). Then\n$$G_{i,t} = \\frac{1}{N_{persist}} \\sum_{s=t-N_{persist}+1}^{t} \\iota_{i,s},$$\nrequiring all `N_persist` observations in the window to be defined; otherwise $G_{i,t}$ is undefined (NaN). $G_{i,t}\\in[0,1]$.\n\n**Step 4 \u2014 Short-horizon reversal control.**\n$$R_{i,t} = \\sum_{s=t-N_{rev}+1}^{t} r_{i,s},$$\nwhere $r_{i,s}$ is the `returns` column, requiring all `N_rev` observations to be defined; otherwise undefined.\n\n**Step 5 \u2014 Cross-sectional standardisation.** For any cross-sectional variable $X_{\\cdot,t}$, let $\\mathcal{U}_t$ be the set of symbols with $X_{i,t}$ defined, $\\mu_t = \\operatorname{mean}_{i\\in\\mathcal{U}_t} X_{i,t}$ and $\\sigma_t = \\operatorname{sd}_{i\\in\\mathcal{U}_t} X_{i,t}$ (sample standard deviation, $ddof=1$). Then\n$$Z[X]_{i,t} = \\operatorname{clip}\\!\\left( \\frac{X_{i,t}-\\mu_t}{\\sigma_t},\\; -C_{clip},\\; +C_{clip} \\right), \\qquad \\sigma_t > 0,$$\nand $Z[X]_{i,t}$ is undefined (NaN) if $\\sigma_t = 0$, if $\\sigma_t$ is undefined, or if $X_{i,t}$ is undefined.\n\n**Step 6 \u2014 Composite raw score.**\n$$S_{i,t} = w_{prox}\\, Z[P]_{i,t} \\;+\\; w_{pers}\\, Z[G]_{i,t} \\;-\\; w_{rev}\\, Z[R]_{i,t}.$$\n$S_{i,t}$ is undefined if any of the three standardised components is undefined.\n\n**Step 7 \u2014 Temporal smoothing.**\n$$\\bar{S}_{i,t} = \\frac{1}{N_{smooth}} \\sum_{s=t-N_{smooth}+1}^{t} S_{i,s},$$\nrequiring all `N_smooth` values to be defined; otherwise undefined.\n\n**Step 8 \u2014 Final signal.**\n$$\\alpha_{i,t} = Z[\\bar{S}]_{i,t}.$$\n\n**Undefined-value handling (complete statement).** Rolling windows use the explicit minimum-observation counts above (`N_high_min` for Step 1; full-window requirements for Steps 3, 4, 7). Division in Step 2 is guarded by $H_{i,t}>0$; division in Step 5 is guarded by $\\sigma_t>0$. Winsorisation at $\\pm C_{clip}$ is applied only inside Step 5. No other imputation, filling, or replacement is performed; symbols with undefined values on a given date carry a NaN signal and are excluded from that date's cross-section.\n\n# Section 3: Causal Rationale\n\nThe trailing 252-day high is a salient, publicly visible reference price that market participants use as an anchor when updating valuations, so prices approaching that anchor tend to face reluctance to bid further (anchoring and disposition-driven supply), producing an initially muted reaction to good news that subsequently resolves as a continued drift. The proximity ratio $\\text{close}/H$ measures exactly this anchoring distance using only observed daily highs and closes, and the persistence term $G$ requires the stock to have sat within `theta` of its own rolling anchor repeatedly over `N_persist` days, distinguishing durable regimes near the anchor from a single spike-and-fade print. Subtracting the standardised `N_rev`-day return removes the component of proximity that is mechanically due to a very recent price jump, which is the horizon at which liquidity-provision reversal effects are strongest and would otherwise contaminate the anchoring signal. Cross-sectional standardisation makes the comparison relative among contemporaneous names, so the signal expresses which stocks are nearest their own anchors relative to peers rather than taking a market-directional view. Temporal smoothing over `N_smooth` days reduces day-to-day churn from single-session closing prints while preserving the slow-moving nature of the anchoring mechanism.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses exclusively point-in-time daily OHLCV data (`high`, `close`) and the daily `returns` series derived from it. No fundamental, analyst, index-membership, corporate-action, or intraday data is used. Prices are assumed already adjusted for splits and dividends on a point-in-time basis; no restatement or survivorship-conditioned universe is used.\n- **Execution timing (fixed rule):** The signal $\\alpha_{i,t}$ is computed using information available up to and including the market close of day $t$, and is executed at the **OPEN of day $t+1$**. Every term in Section 2 references only dates $s \\le t$; no negative shifts or forward-looking windows appear. The formulation therefore complies with this rule. The implementation returns the series aligned to date $t$; the one-day execution lag is applied by the backtesting harness, not inside the function.\n- **Minimum trailing observations per symbol:** The proximity anchor requires `N_high_min` = 200 observations; the persistence term requires the anchor to be defined on each of `N_persist` = 21 consecutive days, and the smoothing requires `N_smooth` = 5 consecutive defined scores. Hence a symbol requires at least\n  $N\\_high\\_min + N\\_persist + N\\_smooth - 2 = 200 + 21 + 5 - 2 = 224$ trailing daily observations before the signal is defined.\n- **Cross-sectional requirement:** At least 2 symbols with defined values and non-zero cross-sectional dispersion are required on a given date for the z-scores to exist; otherwise that date's signal is NaN.\n- **Other bounds:** The signal is unbounded in $\\bar{S}$ before the final standardisation but is winsorised at $\\pm C_{clip}$ in each z-score step. The alpha is intended for liquid, continuously traded US common equities; halted or non-trading symbols produce missing rolling windows and are excluded by the minimum-observation rules.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_high=252,\n                   N_high_min=200,\n                   N_persist=21,\n                   theta=0.05,\n                   N_rev=5,\n                   N_smooth=5,\n                   C_clip=3.0,\n                   w_prox=1.0,\n                   w_pers=0.5,\n                   w_rev=0.5):\n    df = df.sort_index()\n    sym = df.groupby(level='symbol')\n\n    H = sym['high'].transform(\n        lambda x: x.rolling(N_high, min_periods=N_high_min).max()\n    )\n\n    H_valid = H.where(H > 0)\n    P = df['close'] / H_valid\n\n    iota = (df['close'] >= (1.0 - theta) * H_valid).astype(float)\n    iota = iota.where(H_valid.notna())\n    G = iota.groupby(level='symbol').transform(\n        lambda x: x.rolling(N_persist, min_periods=N_persist).mean()\n    )\n\n    R = sym['returns'].transform(\n        lambda x: x.rolling(N_rev, min_periods=N_rev).sum()\n    )\n\n    zs = {}\n    for name, X in (('P', P), ('G', G), ('R', R)):\n        mu = X.groupby(level='date').transform('mean')\n        sd = X.groupby(level='date').transform('std')\n        zs[name] = ((X - mu) / sd.where(sd > 0)).clip(-C_clip, C_clip)\n\n    S = w_prox * zs['P'] + w_pers * zs['G'] - w_rev * zs['R']\n\n    S_bar = S.groupby(level='symbol').transform(\n        lambda x: x.rolling(N_smooth, min_periods=N_smooth).mean()\n    )\n\n    mu_f = S_bar.groupby(level='date').transform('mean')\n    sd_f = S_bar.groupby(level='date').transform('std')\n    alpha = ((S_bar - mu_f) / sd_f.where(sd_f > 0)).clip(-C_clip, C_clip)\n\n    alpha.name = 'alpha_p52_pra'\n    return alpha.reindex(df.index)\n```",
+    "response_sha256": "817d7f11273b0583da431f347deccd3d1d871278500b9629f2d80541cf2cfb8a",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_high_min",
+            "N_persist",
+            "theta",
+            "N_rev",
+            "N_smooth",
+            "C_clip",
+            "w_prox",
+            "w_pers",
+            "w_rev"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [
+            "float"
+        ],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1631,
+            "output_tokens": 5631,
+            "total_tokens": 7262
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

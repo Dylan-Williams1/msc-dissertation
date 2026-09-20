@@ -1,0 +1,96 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_cd223ad6",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "N_range"
+        ],
+        "theme": "volatility",
+        "theme_title": "volatility",
+        "timestamp_utc": "2026-08-21T00:15:12.891180+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 11,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1164507530,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "648a97e6e4aee554ab01daddaa2a5c061aad01e133fee8b28537b129696436f6",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Volatility-Expansion Reversal\n- **Holding Period:** 1 trading day\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_vol = 20`: lookback for prior close-to-close realized volatility\n  - `N_range = 20`: lookback for prior average intraday range\n- **Required Inputs:** `high`, `low`, `close`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), define the normalized intraday range:\n\n\\[\nq_{i,t}=\\frac{H_{i,t}-L_{i,t}}{C_{i,t}},\n\\]\n\nwhere \\(H_{i,t}\\), \\(L_{i,t}\\), and \\(C_{i,t}\\) are the daily high, low, and close. This quantity is undefined when \\(C_{i,t}\\leq 0\\).\n\nUsing observations strictly before day \\(t\\), define prior realized volatility:\n\n\\[\n\\sigma_{i,t}^{\\mathrm{prior}}\n=\n\\sqrt{\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=1}^{N_{\\mathrm{vol}}} r_{i,t-k}^{2}\n},\n\\]\n\nwhere \\(r_{i,t}\\) is the supplied daily return.\n\nDefine the prior average normalized range:\n\n\\[\n\\bar q_{i,t}^{\\mathrm{prior}}\n=\n\\frac{1}{N_{\\mathrm{range}}}\n\\sum_{k=1}^{N_{\\mathrm{range}}} q_{i,t-k}.\n\\]\n\nThe volatility-expansion multiplier is:\n\n\\[\ne_{i,t}\n=\n\\frac{q_{i,t}}{\\bar q_{i,t}^{\\mathrm{prior}}}.\n\\]\n\nThe raw reversal score is:\n\n\\[\nx_{i,t}\n=\n-\\frac{r_{i,t}}{\\sigma_{i,t}^{\\mathrm{prior}}}e_{i,t}.\n\\]\n\nThus, unusually large negative returns occurring with expanded intraday volatility receive positive scores, while unusually large positive returns occurring with expanded volatility receive negative scores.\n\nOn each date \\(t\\), let \\(M_t\\) be the number of symbols with valid raw scores and let \\(R_{i,t}\\) be the average rank of \\(x_{i,t}\\) among those symbols in ascending order. The final signal is:\n\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{M_t-1}-1.\n\\]\n\nThe signal is undefined when \\(M_t<2\\).\n\nBoth rolling calculations require exactly their full declared lookbacks; no partial windows are used. Missing observations are not imputed, so any missing value within a required rolling window makes the corresponding result undefined. The raw score is also undefined if \\(\\sigma_{i,t}^{\\mathrm{prior}}\\leq 0\\), \\(\\bar q_{i,t}^{\\mathrm{prior}}\\leq 0\\), or any required current-day input is missing. These conditions prevent division by zero and infinite values. No clipping or winsorization is performed.\n\n## Section 3: Causal Rationale\n\nA large close-to-close return accompanied by an intraday range substantially above its own trailing average identifies a price displacement occurring during a volatility expansion. The normalized range \\(q_{i,t}\\) is the OHLC proxy for current volatility, while the return scaled by prior realized volatility measures the displacement relative to the symbol\u2019s recent variability. Such an abrupt, range-confirmed displacement can represent transitory one-day price pressure, for which the observable proxy is the joint occurrence of an extreme standardized return and elevated daily range. The signal therefore takes the opposite side of the displacement, with larger positions assigned to events exhibiting stronger volatility expansion.\n\n## Section 4: Structural Bounds\n\n- The formulation relies solely on Point-in-Time daily OHLCV data and supplied daily returns; it does not use revised, future, or non-OHLCV information.\n- The signal for day \\(t\\) is generated using only data available through the market close of day \\(t\\).\n- Execution occurs at the **open of day \\(t+1\\)**. The formulation complies with this timing rule, and the implementation does not apply the execution lag.\n- A symbol requires at least\n\n\\[\n1+\\max(N_{\\mathrm{vol}},N_{\\mathrm{range}})\n\\]\n\nconsecutive observations ending on day \\(t\\), with all required fields valid. Under the default parameters, this is \\(21\\) observations.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(df, N_vol=20, N_range=20):\n    import pandas as pd\n\n    data = df.sort_index(level=[\"symbol\", \"date\"])\n\n    normalized_range = (\n        (data[\"high\"] - data[\"low\"]) / data[\"close\"]\n    ).where(data[\"close\"] > 0)\n\n    prior_squared_returns = (\n        data.groupby(level=\"symbol\")[\"returns\"].shift(1).pow(2)\n    )\n    prior_variance = (\n        prior_squared_returns.groupby(level=\"symbol\")\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .droplevel(0)\n    )\n    prior_volatility = prior_variance.pow(0.5)\n\n    lagged_range = normalized_range.groupby(level=\"symbol\").shift(1)\n    prior_average_range = (\n        lagged_range.groupby(level=\"symbol\")\n        .rolling(window=N_range, min_periods=N_range)\n        .mean()\n        .droplevel(0)\n    )\n\n    valid_denominators = (\n        (prior_volatility > 0) & (prior_average_range > 0)\n    )\n\n    raw_signal = (\n        -data[\"returns\"]\n        / prior_volatility\n        * normalized_range\n        / prior_average_range\n    ).where(valid_denominators)\n\n    cross_sectional_rank = raw_signal.groupby(level=\"date\").rank(\n        method=\"average\", ascending=True\n    )\n    valid_count = raw_signal.groupby(level=\"date\").transform(\"count\")\n\n    alpha = (\n        2 * (cross_sectional_rank - 1) / (valid_count - 1) - 1\n    ).where(valid_count > 1)\n\n    return alpha.reindex(df.index).rename(\"alpha\")\n```",
+    "response_sha256": "1bc6308133318675d22d3eabbfa06de1ec4dabe9acaa84c45c269de8b680a752",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "N_range"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 996,
+            "output_tokens": 3658,
+            "total_tokens": 4654
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

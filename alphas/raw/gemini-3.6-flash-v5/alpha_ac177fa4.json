@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_ac177fa4",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1807105615,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_lookback",
+            "N_vol",
+            "V_cap",
+            "N_smooth"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-25T08:34:16.635036+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 6,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Volume-Confirmed 52-Week High Proximity Alpha\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_lookback = 252`: Lookback window in trading days for calculating the trailing peak high price.\n  - `N_vol = 20`: Lookback window in trading days for calculating baseline average trading volume.\n  - `V_cap = 3.0`: Upper threshold multiplier for capping the relative volume ratio.\n  - `N_smooth = 5`: Span parameter in trading days for exponential moving average signal smoothing.\n- Required Inputs: `high`, `close`, `volume`\n\n# Section 2: Mathematical Formulation\n\nLet $C_{i,t}$, $H_{i,t}$, and $V_{i,t}$ denote the close price, high price, and trading volume for symbol $i$ on date $t$, respectively.\n\n1. Trailing $N_{lookback}$-day Maximum High Price:\n$$MAXH_{i,t} = \\max_{k \\in \\{0, 1, \\dots, N_{lookback}-1\\}} H_{i, t-k}$$\nRequires a minimum observation count of $N_{lookback}$ valid consecutive trailing trading days. If fewer than $N_{lookback}$ observations are available, $MAXH_{i,t}$ is undefined ($\\text{NaN}$).\n\n2. 52-Week High Proximity Ratio:\n$$PR_{i,t} = \\frac{C_{i,t}}{MAXH_{i,t}}$$\nSince $C_{i,t} \\le H_{i,t} \\le MAXH_{i,t}$, $PR_{i,t} \\in (0, 1]$. If $MAXH_{i,t}$ is undefined, $PR_{i,t}$ is $\\text{NaN}$.\n\n3. Volume Baseline Simple Moving Average:\n$$SMA\\_V_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} V_{i, t-k}$$\nRequires a minimum observation count of $N_{vol}$ valid consecutive trailing trading days. If fewer than $N_{vol}$ observations are available, $SMA\\_V_{i,t}$ is undefined ($\\text{NaN}$).\n\n4. Volume Ratio and Capped Volume Ratio:\n$$VR_{i,t} = \\begin{cases} \\frac{V_{i,t}}{SMA\\_V_{i,t}} & \\text{if } SMA\\_V_{i,t} > 0 \\\\ 1.0 & \\text{if } SMA\\_V_{i,t} = 0 \\\\ \\text{NaN} & \\text{if } SMA\\_V_{i,t} \\text{ is } \\text{NaN} \\end{cases}$$\n\n$$VR_{capped, i, t} = \\min(VR_{i,t}, V_{cap})$$\n\n5. Raw Interaction Signal:\n$$S_{raw, i, t} = PR_{i,t} \\times VR_{capped, i, t}$$\nIf either $PR_{i,t}$ or $VR_{capped, i, t}$ is $\\text{NaN}$, $S_{raw, i, t}$ is $\\text{NaN}$.\n\n6. Cross-Sectional Standardization (Z-Score):\nLet $M_t = \\{i \\mid S_{raw, i, t} \\text{ is non-NaN}\\}$ represent the set of valid universe constituents at date $t$.\n$$\\mu_t = \\frac{1}{|M_t|} \\sum_{i \\in M_t} S_{raw, i, t}$$\n$$\\sigma_t = \\sqrt{\\frac{1}{|M_t| - 1} \\sum_{i \\in M_t} (S_{raw, i, t} - \\mu_t)^2}$$\n$$Z_{i,t} = \\begin{cases} \\frac{S_{raw, i, t} - \\mu_t}{\\sigma_t} & \\text{if } i \\in M_t \\text{ and } \\sigma_t > 0 \\\\ 0.0 & \\text{if } i \\in M_t \\text{ and } \\sigma_t = 0 \\\\ \\text{NaN} & \\text{if } i \\notin M_t \\text{ or } \\sigma_t \\text{ is } \\text{NaN} \\end{cases}$$\n\n7. Signal Exponential Smoothing:\n$$Final\\_Alpha_{i,t} = \\text{EMA}\\left(Z_{i,t}; \\text{span}=N_{smooth}, \\text{min\\_periods}=N_{smooth}\\right)$$\nwhere the exponential moving average uses weighting factor $\\alpha_{smooth} = \\frac{2}{N_{smooth}+1}$ and requires at least $N_{smooth}$ consecutive valid cross-sectional $Z_{i,t}$ values per symbol.\n\n# Section 3: Causal Rationale\n\nPsychological anchoring at historical price extremes causes market participants to view the 52-week high as a key resistance level, leading to temporary selling pressure and delayed price discovery as asset prices approach this peak. As fundamental information drives an equity toward its trailing 252-day maximum price, resistance is gradually absorbed, generating persistent upward return momentum upon approaching breakout levels. Scaling this 52-week high proximity ratio by short-term volume relative to its 20-day moving average acts as an observable proxy for trading activity intensity, differentiating high-conviction breakout attempts from low-volume drift. Cross-sectional z-scoring isolates relative strength across the asset universe, while short-term exponential smoothing reduces execution turnover induced by daily volume noise.\n\n# Section 4: Structural Bounds\n\n- Point-in-Time Confirmation: The strategy relies exclusively on Point-in-Time daily OHLCV market data.\n- Execution Timing Rule: The signal $Final\\_Alpha_{i,t}$ is computed using market data available up to the close of day $t$, and portfolio allocation execution occurs at the market OPEN on day $t+1$. The formulation complies with this constraint by using no forward-looking data or negative index shifts inside signal generation.\n- Trailing Observation Requirement: The minimum number of trailing trading days required before the signal is defined for a symbol is $N_{lookback} = 252$ days.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_lookback=252, N_vol=20, V_cap=3.0, N_smooth=5):\n    # Trailing N_lookback-day maximum high price per symbol\n    max_h = df.groupby(level=\"symbol\")[\"high\"].transform(\n        lambda x: x.rolling(window=N_lookback, min_periods=N_lookback).max()\n    )\n\n    # 52-week high proximity ratio\n    pr = df[\"close\"] / max_h\n\n    # Trailing N_vol simple moving average of volume per symbol\n    sma_v = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).mean()\n    )\n\n    # Volume ratio calculation with zero-division handling\n    vr = df[\"volume\"] / sma_v\n    vr = vr.where((sma_v > 0) | sma_v.isna(), 1.0)\n\n    # Capped volume ratio\n    vr_capped = vr.clip(upper=V_cap)\n\n    # Raw interaction signal\n    s_raw = pr * vr_capped\n\n    # Cross-sectional Z-score statistics per date\n    mean_t = s_raw.groupby(level=\"date\").transform(\"mean\")\n    std_t = s_raw.groupby(level=\"date\").transform(\"std\")\n\n    # Z-score computation with explicit zero variance and missing value preservation\n    z_score_values = np.where(\n        s_raw.isna(),\n        np.nan,\n        np.where(std_t > 0, (s_raw - mean_t) / std_t, 0.0),\n    )\n    z_score = pd.Series(z_score_values, index=df.index)\n\n    # Exponential moving average smoothing per symbol\n    alpha = z_score.groupby(level=\"symbol\").transform(\n        lambda x: x.ewm(span=N_smooth, min_periods=N_smooth).mean()\n    )\n\n    return alpha\n```",
+    "response_sha256": "e5bcde130fc36103446ea8cd94ad47be2b8817f24556ca459d801aba08d803d8",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_lookback",
+            "N_vol",
+            "V_cap",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1807105615,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1038,
+            "output_tokens": 1909,
+            "total_tokens": 9938
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

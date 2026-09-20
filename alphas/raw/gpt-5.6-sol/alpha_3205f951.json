@@ -1,0 +1,108 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_3205f951",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_vol",
+            "N_volume",
+            "sigma_floor",
+            "volume_floor",
+            "log_offset",
+            "rank_center",
+            "N_cs_min"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-21T00:05:15.779199+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 3,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1312298517,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Weighted Volatility-Normalized Short-Term Reversal\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_rev = 3`: close-to-close reversal lookback in trading days\n  - `N_vol = 20`: realized-volatility lookback\n  - `N_volume = 20`: rolling median-volume lookback\n  - `sigma_floor = 1e-6`: minimum valid realized volatility\n  - `volume_floor = 0.0`: minimum valid rolling median volume\n  - `log_offset = 1.0`: positive offset in the logarithmic relative-volume transformation\n  - `rank_center = 0.5`: center applied to cross-sectional percentile ranks\n  - `N_cs_min = 30`: minimum number of valid symbols required per date\n- **Required Inputs:** `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(C_{i,t}\\), \\(V_{i,t}\\), and \\(r_{i,t}\\) denote close, volume, and daily return, respectively.\n\nFirst, define the short-term close-to-close return:\n\n\\[\nR^{\\mathrm{rev}}_{i,t}\n=\n\\frac{C_{i,t}}{C_{i,t-N_{\\mathrm{rev}}}}-1.\n\\]\n\nDefine the rolling mean return:\n\n\\[\n\\bar r_{i,t}\n=\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=0}^{N_{\\mathrm{vol}}-1}r_{i,t-k},\n\\]\n\nand the population realized volatility:\n\n\\[\n\\sigma_{i,t}\n=\n\\sqrt{\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=0}^{N_{\\mathrm{vol}}-1}\n\\left(r_{i,t-k}-\\bar r_{i,t}\\right)^2\n}.\n\\]\n\nDefine rolling median volume:\n\n\\[\nM^V_{i,t}\n=\n\\operatorname{median}\n\\left(\nV_{i,t},\nV_{i,t-1},\n\\ldots,\nV_{i,t-N_{\\mathrm{volume}}+1}\n\\right),\n\\]\n\nand relative volume:\n\n\\[\nQ_{i,t}\n=\n\\frac{V_{i,t}}{M^V_{i,t}}.\n\\]\n\nThe raw reversal score is:\n\n\\[\nX_{i,t}\n=\n-\n\\frac{R^{\\mathrm{rev}}_{i,t}}\n{\\sigma_{i,t}\\sqrt{N_{\\mathrm{rev}}}}\n\\log\\left(\\mathrm{log\\_offset}+Q_{i,t}\\right).\n\\]\n\nFor each date \\(t\\), let \\(n_t\\) be the number of symbols with valid raw scores. Rank valid \\(X_{i,t}\\) values in ascending order, assigning tied observations their average rank. Define the percentile rank:\n\n\\[\nP_{i,t}\n=\n\\frac{\\operatorname{rank}^{\\mathrm{avg}}_t(X_{i,t})}{n_t}.\n\\]\n\nThe final alpha is:\n\n\\[\n\\alpha_{i,t}\n=\nP_{i,t}-\\mathrm{rank\\_center}.\n\\]\n\nThus, symbols with the strongest volume-weighted negative short-term returns receive the largest positive signals.\n\nThe signal is defined only when \\(C_{i,t}\\) and \\(C_{i,t-N_{\\mathrm{rev}}}\\) are finite and strictly positive, all \\(N_{\\mathrm{vol}}\\) returns are finite and nonmissing, all \\(N_{\\mathrm{volume}}\\) volume observations are finite and nonmissing, \\(V_{i,t}\\) is nonnegative, \\(\\sigma_{i,t}>\\mathrm{sigma\\_floor}\\), and \\(M^V_{i,t}>\\mathrm{volume\\_floor}\\). Rolling windows use minimum observation counts equal to their full window lengths. Non-finite values are treated as missing; missing values are not imputed. Invalid divisions produce an undefined signal, and no clipping is applied. The cross-sectional signal is undefined for all symbols on dates with \\(n_t<N_{\\mathrm{cs\\_min}}\\).\n\n## Section 3: Causal Rationale\n\nLarge short-horizon price changes can temporarily exceed the price adjustment justified by immediately available trading interest, creating subsequent reversal as liquidity is replenished. The negative recent return term directly captures this short-term reversal mechanism, while realized-volatility normalization distinguishes an unusually large move from ordinary variation for the same symbol. Relative volume, observed directly from daily volume, increases the weight of moves accompanied by unusually high turnover and therefore greater potential temporary price pressure. Cross-sectional ranking produces market-relative long exposure to recent losers and short exposure to recent winners without requiring non-OHLCV information.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time (PIT) daily `close`, `volume`, and `returns` data drawn from the permitted OHLCV and returns fields.\n\nThe signal for day \\(t\\) is generated using only data available through the market close of day \\(t\\) and is executed at the open of day \\(t+1\\). The formulation complies with this rule because every lag, rolling window, and cross-sectional rank uses only observations dated at or before \\(t\\); the implementation does not apply the execution lag.\n\nFor a symbol, the minimum trailing history is:\n\n\\[\nN_{\\min}\n=\n\\max\\left(\nN_{\\mathrm{rev}}+1,\\,\nN_{\\mathrm{vol}},\\,\nN_{\\mathrm{volume}}\n\\right),\n\\]\n\nwhich equals \\(20\\) daily rows under the default parameters, subject to the required fields being finite and nonmissing as specified above. A date additionally requires at least `N_cs_min = 30` valid symbol-level raw scores.\n\n## Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\ndef generate_alpha(\n    df,\n    N_rev=3,\n    N_vol=20,\n    N_volume=20,\n    sigma_floor=1e-6,\n    volume_floor=0.0,\n    log_offset=1.0,\n    rank_center=0.5,\n    N_cs_min=30\n):\n    original_index = df.index\n    df = df.copy().sort_index()\n\n    finite_inputs = np.isfinite(df[[\"close\", \"volume\", \"returns\"]])\n    df.loc[:, [\"close\", \"volume\", \"returns\"]] = df[\n        [\"close\", \"volume\", \"returns\"]\n    ].where(finite_inputs)\n\n    symbol_group = df.groupby(level=\"symbol\", sort=False)\n\n    lagged_close = symbol_group[\"close\"].shift(N_rev)\n\n    realized_volatility = (\n        symbol_group[\"returns\"]\n        .rolling(window=N_vol, min_periods=N_vol)\n        .std(ddof=0)\n        .droplevel(0)\n    )\n\n    median_volume = (\n        symbol_group[\"volume\"]\n        .rolling(window=N_volume, min_periods=N_volume)\n        .median()\n        .droplevel(0)\n    )\n\n    reversal_return = df[\"close\"] / lagged_close - 1.0\n    relative_volume = df[\"volume\"] / median_volume\n\n    valid = (\n        (df[\"close\"] > 0.0)\n        & (lagged_close > 0.0)\n        & (df[\"volume\"] >= 0.0)\n        & (median_volume > volume_floor)\n        & (realized_volatility > sigma_floor)\n        & ((log_offset + relative_volume) > 0.0)\n    )\n\n    df[\"_raw_alpha\"] = (\n        -reversal_return\n        / (realized_volatility * np.sqrt(N_rev))\n        * np.log(log_offset + relative_volume)\n    ).where(valid)\n\n    date_group = df.groupby(level=\"date\", sort=False)\n    percentile_rank = date_group[\"_raw_alpha\"].rank(\n        method=\"average\",\n        ascending=True,\n        pct=True,\n        na_option=\"keep\"\n    )\n    valid_count = date_group[\"_raw_alpha\"].transform(\"count\")\n\n    alpha = (percentile_rank - rank_center).where(valid_count >= N_cs_min)\n    alpha = alpha.rename(\"alpha\").reindex(original_index)\n\n    return alpha\n```",
+    "response_sha256": "a6dba01d921c65a16c370880aea57e9170385d7991021e932aec3243a12a2026",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_vol",
+            "N_volume",
+            "sigma_floor",
+            "volume_floor",
+            "log_offset",
+            "rank_center",
+            "N_cs_min"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 998,
+            "output_tokens": 4691,
+            "total_tokens": 5689
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

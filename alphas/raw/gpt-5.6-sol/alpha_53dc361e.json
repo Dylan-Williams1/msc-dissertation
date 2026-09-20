@@ -1,0 +1,100 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_53dc361e",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_vol",
+            "Z_threshold",
+            "N_xs"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-21T00:19:41.843963+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 15,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 2002335143,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Abnormal-Volume Close-Location Continuation\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_vol = 20`: lookback window for prior log-volume statistics\n  - `Z_threshold = 0.5`: minimum abnormal-volume z-score\n  - `N_xs = 20`: minimum number of valid symbols required for cross-sectional ranking\n- **Required Inputs:** `high`, `low`, `close`, `volume`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), define positive log volume as\n\n\\[\n\\ell_{i,t}=\\log(V_{i,t}),\n\\]\n\nwhere \\(V_{i,t}\\) is `volume`. If \\(V_{i,t}\\leq 0\\) or is missing, then \\(\\ell_{i,t}\\) is undefined.\n\nUsing only the \\(N_{\\mathrm{vol}}\\) observations strictly preceding day \\(t\\), calculate\n\n\\[\n\\mu_{i,t}^{V}\n=\n\\frac{1}{N_{\\mathrm{vol}}}\n\\sum_{k=1}^{N_{\\mathrm{vol}}}\\ell_{i,t-k},\n\\]\n\nand the sample standard deviation\n\n\\[\n\\sigma_{i,t}^{V}\n=\n\\sqrt{\n\\frac{\n\\sum_{k=1}^{N_{\\mathrm{vol}}}\n\\left(\\ell_{i,t-k}-\\mu_{i,t}^{V}\\right)^2\n}{\nN_{\\mathrm{vol}}-1\n}\n}.\n\\]\n\nThe current abnormal-volume score is\n\n\\[\nZ_{i,t}^{V}\n=\n\\frac{\\ell_{i,t}-\\mu_{i,t}^{V}}{\\sigma_{i,t}^{V}}.\n\\]\n\nIf \\(\\sigma_{i,t}^{V}=0\\) or is undefined, then \\(Z_{i,t}^{V}\\) is undefined. Define excess abnormal volume as\n\n\\[\nA_{i,t}\n=\n\\max\\left(Z_{i,t}^{V}-Z_{\\mathrm{threshold}},\\,0\\right).\n\\]\n\nDefine the close-location value within the daily range as\n\n\\[\nC_{i,t}^{L}\n=\n\\frac{\n(C_{i,t}-L_{i,t})-(H_{i,t}-C_{i,t})\n}{\nH_{i,t}-L_{i,t}\n},\n\\]\n\nwhere \\(H_{i,t}\\), \\(L_{i,t}\\), and \\(C_{i,t}\\) are `high`, `low`, and `close`. If \\(H_{i,t}-L_{i,t}\\leq 0\\), or any required price is missing, then \\(C_{i,t}^{L}\\) is undefined.\n\nThe raw signal is\n\n\\[\nX_{i,t}=A_{i,t}C_{i,t}^{L}.\n\\]\n\nFor each date \\(t\\), let \\(M_t\\) be the number of symbols with defined \\(X_{i,t}\\), and let \\(R_{i,t}\\) be the ascending cross-sectional rank of \\(X_{i,t}\\), using average ranks for ties. If \\(M_t\\geq N_{\\mathrm{xs}}\\), define\n\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{M_t-1}-1.\n\\]\n\nOtherwise, \\(\\alpha_{i,t}\\) is undefined for all symbols on that date.\n\nRolling statistics require exactly \\(N_{\\mathrm{vol}}\\) non-missing prior log-volume observations within the trailing window. Missing rows are not fabricated or interpolated; missing inputs propagate to the relevant intermediate value. Cross-sectional ranks exclude undefined raw signals. No other imputation, clipping, or infinity replacement is performed.\n\n## Section 3: Causal Rationale\n\nUnusually high volume identifies sessions in which trading activity is materially greater than the symbol\u2019s recent baseline. The close-location value uses the close near the high or low as an OHLC proxy for the direction of pressure accompanying that elevated activity. High-volume sessions that close near an extreme may reflect incomplete adjustment because a large quantity of trading occurred in one direction before the close, creating short-horizon continuation. Ordinary-volume sessions receive no directional signal, making abnormal volume the event filter and central mechanism.\n\n## Section 4: Structural Bounds\n\nThe alpha relies solely on Point-in-Time (PIT) daily OHLCV data; no fundamental, alternative, or subsequently revised information is used.\n\nThe signal for day \\(t\\) is generated using only data available up to and including the market close on day \\(t\\). Execution occurs at the open of day \\(t+1\\). The formulation complies with this rule because all rolling volume statistics use observations no later than \\(t\\), and the implementation returns the unlagged signal aligned to day \\(t\\).\n\nA symbol requires at least \\(N_{\\mathrm{vol}}+1\\) chronologically ordered observations: \\(N_{\\mathrm{vol}}\\) valid prior positive-volume observations and the current observation. The current observation must also have valid positive volume and a strictly positive high-low range. A date additionally requires at least \\(N_{\\mathrm{xs}}\\) valid raw signals for the cross-sectional alpha to be defined.\n\n## Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\ndef generate_alpha(df, N_vol=20, Z_threshold=0.5, N_xs=20):\n    work = df.sort_index(level=[\"date\", \"symbol\"])\n\n    log_volume = np.log(work[\"volume\"].where(work[\"volume\"] > 0))\n    prior_log_volume = log_volume.groupby(level=\"symbol\").shift(1)\n\n    volume_mean = (\n        prior_log_volume.groupby(level=\"symbol\")\n        .rolling(window=N_vol, min_periods=N_vol)\n        .mean()\n        .droplevel(0)\n        .reindex(work.index)\n    )\n\n    volume_std = (\n        prior_log_volume.groupby(level=\"symbol\")\n        .rolling(window=N_vol, min_periods=N_vol)\n        .std(ddof=1)\n        .droplevel(0)\n        .reindex(work.index)\n    )\n\n    volume_z = (\n        (log_volume - volume_mean)\n        / volume_std.where(volume_std > 0)\n    )\n\n    abnormal_volume = (volume_z - Z_threshold).clip(lower=0)\n\n    daily_range = work[\"high\"] - work[\"low\"]\n    close_location = (\n        ((work[\"close\"] - work[\"low\"]) - (work[\"high\"] - work[\"close\"]))\n        / daily_range.where(daily_range > 0)\n    )\n\n    raw_signal = abnormal_volume * close_location\n\n    valid_count = raw_signal.groupby(level=\"date\").transform(\"count\")\n    cross_sectional_rank = raw_signal.groupby(level=\"date\").rank(\n        method=\"average\",\n        ascending=True\n    )\n\n    alpha = (\n        2 * (cross_sectional_rank - 1) / (valid_count - 1) - 1\n    ).where(valid_count >= N_xs)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = \"abnormal_volume_close_location_alpha\"\n    return alpha\n```",
+    "response_sha256": "6314d04df8a4611989c991e733f5f789e7d6b6a402a1457a11dcfa614e3db713",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_vol",
+            "Z_threshold",
+            "N_xs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 997,
+            "output_tokens": 3578,
+            "total_tokens": 4575
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

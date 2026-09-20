@@ -1,0 +1,81 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_a728eba6",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1230285834,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_vol_short",
+            "N_vol_long",
+            "min_obs"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-25T08:35:28.661751+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 7,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n- Formula Name: Volume-Weighted 52-Week High Anchor Ratio (V-52HI)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_high = 252`: Lookback window length in days for the 52-week peak price.\n  - `N_vol_short = 5`: Short-term moving average window length in days for volume.\n  - `N_vol_long = 60`: Long-term moving average window length in days for volume.\n  - `min_obs = 126`: Minimum non-null daily observations required within trailing lookback windows.\n- Required Inputs: `close`, `high`, `volume`\n\n# Section 2: Mathematical Formulation\nLet $P_{close, i, t}$, $P_{high, i, t}$, and $V_{i, t}$ represent the close price, high price, and trading volume for asset $i$ on day $t$.\n\n1. Rolling Peak High Price:\n$$H_{i, t} = \\max_{k \\in [0, N_{high} - 1]} P_{high, i, t-k}$$\n\n2. High Proximity Ratio:\n$$NR_{i, t} = \\frac{P_{close, i, t}}{H_{i, t}}$$\n\n3. Short-Term and Long-Term Volume Averages:\n$$\\bar{V}_{short, i, t} = \\frac{1}{N_{vol\\_short}} \\sum_{k=0}^{N_{vol\\_short} - 1} V_{i, t-k}$$\n$$\\bar{V}_{long, i, t} = \\frac{1}{N_{vol\\_long}} \\sum_{k=0}^{N_{vol\\_long} - 1} V_{i, t-k}$$\n\n4. Volume Expansion Ratio:\n$$VR_{i, t} = \\frac{\\bar{V}_{short, i, t}}{\\bar{V}_{long, i, t}}$$\n\n5. Raw Signal:\n$$S_{i, t} = NR_{i, t} \\times VR_{i, t}$$\n\n6. Cross-Sectional Z-Score Normalization:\n$$\\alpha_{i, t} = \\frac{S_{i, t} - \\mu_t(S)}{\\sigma_t(S)}$$\nwhere $\\mu_t(S)$ and $\\sigma_t(S)$ are the cross-sectional mean and sample standard deviation of $S_{i, t}$ calculated across all valid assets on day $t$.\n\nUndefined Values and Edge Cases:\n- Rolling Window Observations: Computing $H_{i, t}$ and $\\bar{V}_{long, i, t}$ requires a minimum of `min_obs` non-null observations within their respective trailing windows. $\\bar{V}_{short, i, t}$ requires a minimum of $\\min(N_{vol\\_short}, min\\_obs)$ non-null observations. Windows failing this criteria evaluate to $NaN$.\n- Division by Zero: If $H_{i, t} = 0$ or $\\bar{V}_{long, i, t} = 0$, the resulting ratio is replaced with $NaN$.\n- Zero/Undefined Standard Deviation: If $\\sigma_t(S) = 0$ or is undefined due to insufficient cross-sectional observations ($N < 2$), $\\alpha_{i, t}$ is set to $0.0$ for all assets where $S_{i, t}$ is valid (non-$NaN$).\n- Missing Data Handling: Any input or intermediate $NaN$ value propagates to $S_{i, t}$ and is excluded from the cross-sectional calculation of $\\mu_t(S)$ and $\\sigma_t(S)$. Final $\\alpha_{i, t}$ retains $NaN$ where $S_{i, t}$ is $NaN$.\n\n# Section 3: Causal Rationale\nBehavioral anchoring bias leads market participants to view a stock's trailing 52-week high as a psychological resistance level, causing systematic underreaction to positive fundamental updates as prices approach this threshold. When price proximity to the 52-week high is coupled with short-term volume expansion relative to long-term baseline volume, it indicates liquidity absorption of overhead supply. This joint signal distinguishes genuine demand-driven breakout setups from low-volume temporary price fluctuations, identifying assets poised for post-breakout drift.\n\n# Section 4: Structural Bounds\n- Data Integrity: All inputs rely strictly on Point-in-Time (PIT) daily OHLCV market data up to day $t$.\n- Execution Timing Rule: Signal $\\alpha_{i, t}$ is generated using data available at the market close on day $t$, and portfolio execution occurs at the market open on day $t+1$. The mathematical signal strictly adheres to this lag structure without lookahead.\n- Minimum Required History: Each asset requires a minimum of $N_{high} = 252$ trailing daily observations (containing at least `min_obs = 126` valid values) before a non-$NaN$ signal can be defined.\n\n# Section 5: Python Implementation\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_high=252, N_vol_short=5, N_vol_long=60, min_obs=126):\n    # 1. Trailing max high price\n    high_max = df.groupby(level=\"symbol\")[\"high\"].transform(\n        lambda x: x.rolling(window=N_high, min_periods=min_obs).max()\n    )\n\n    # 2. Nearness Ratio (Close / 52-Week High)\n    nearness = df[\"close\"] / high_max\n    nearness = nearness.replace([np.inf, -np.inf], np.nan)\n\n    # 3. Volume Moving Averages\n    vol_short_min = min(N_vol_short, min_obs)\n    vol_short = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(\n            window=N_vol_short, min_periods=vol_short_min\n        ).mean()\n    )\n    vol_long = df.groupby(level=\"symbol\")[\"volume\"].transform(\n        lambda x: x.rolling(window=N_vol_long, min_periods=min_obs).mean()\n    )\n\n    # Volume Expansion Ratio\n    vol_ratio = vol_short / vol_long\n    vol_ratio = vol_ratio.replace([np.inf, -np.inf], np.nan)\n\n    # 4. Raw Signal Interaction\n    raw_signal = nearness * vol_ratio\n\n    # 5. Cross-Sectional Z-Score Normalization\n    mean_t = raw_signal.groupby(level=\"date\").transform(\"mean\")\n    std_t = raw_signal.groupby(level=\"date\").transform(\"std\")\n\n    alpha = (raw_signal - mean_t) / std_t\n    alpha = alpha.replace([np.inf, -np.inf], np.nan)\n\n    # Handle cross-sectional zero or undefined standard deviation\n    valid_mask = raw_signal.notna()\n    zero_std_mask = (std_t == 0) | std_t.isna()\n    alpha[valid_mask & zero_std_mask] = 0.0\n\n    return alpha\n```",
+    "response_sha256": "0a868466da5aa6aca7ea9dba3087e1951d0d72d4dd283c7959f7b28b91157b3e",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_vol_short",
+            "N_vol_long",
+            "min_obs"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1230285834,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1038,
+            "output_tokens": 1655,
+            "total_tokens": 8327
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

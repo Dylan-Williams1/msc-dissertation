@@ -1,0 +1,96 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_8c81a59b",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_smooth"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-21T00:23:02.416698+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 18,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1321039729,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Persistent 52-Week-High Nearness\n- **Holding Period:** 10 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_high = 252`: trailing window used to calculate the 52-week high\n  - `N_smooth = 5`: trailing window used to smooth high nearness\n- **Required Inputs:** `high`, `close`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(H_{i,t}\\) and \\(C_{i,t}\\) denote the daily high and close.\n\n1. Calculate the trailing high:\n\n\\[\nM_{i,t}=\\max_{u=t-N_{\\text{high}}+1,\\ldots,t} H_{i,u}.\n\\]\n\nThe rolling maximum requires exactly \\(N_{\\text{high}}\\) non-missing high observations within the window.\n\n2. Measure nearness to the trailing high:\n\n\\[\nQ_{i,t}=\\frac{C_{i,t}}{M_{i,t}}.\n\\]\n\nIf \\(C_{i,t}\\) or \\(M_{i,t}\\) is missing, or if \\(M_{i,t}=0\\), then \\(Q_{i,t}\\) is undefined. The ratio is not clipped or otherwise imputed.\n\n3. Smooth the nearness measure:\n\n\\[\nP_{i,t}\n=\n\\frac{1}{N_{\\text{smooth}}}\n\\sum_{u=t-N_{\\text{smooth}}+1}^{t} Q_{i,u}.\n\\]\n\nThis rolling mean requires exactly \\(N_{\\text{smooth}}\\) non-missing values of \\(Q_{i,u}\\) within the smoothing window.\n\n4. On each date, rank \\(P_{i,t}\\) across all symbols for which it is defined. Let \\(R_{i,t}\\) be the ascending cross-sectional rank, using average ranks for ties, and let \\(n_t\\) be the number of defined observations. The alpha is:\n\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{n_t-1}-1.\n\\]\n\nThus, the lowest persistent nearness receives a signal of \\(-1\\), and the highest receives \\(+1\\), subject to ties. If \\(n_t<2\\), the signal is undefined for that date. Missing observations remain undefined throughout; no imputation, clipping, or infinity substitution is performed.\n\n## Section 3: Causal Rationale\n\nA close that persistently remains near the trailing 52-week high indicates that recent gains have not been substantially reversed in the observable daily price path. Investors may adjust reference prices slowly, so prior highs can act as salient anchors and delay the incorporation of information already reflected in sustained price strength. Averaging nearness over `N_smooth` days reduces sensitivity to a single transient touch of the trailing high. The cross-sectional construction buys symbols showing the strongest persistent high nearness and shorts those trading furthest below their trailing highs.\n\n## Section 4: Structural Bounds\n\n- The formulation relies solely on Point-in-Time daily `high` and `close` data drawn from the permitted OHLCV dataset.\n- The signal for day \\(t\\) is generated using only data available up to and including the market close on day \\(t\\).\n- Execution occurs at the **open of day \\(t+1\\)**. The formulation complies with this timing rule and contains no forward-looking shifts.\n- The minimum number of trailing symbol observations required is:\n\n\\[\nN_{\\text{high}}+N_{\\text{smooth}}-1\n=\n252+5-1\n=\n256.\n\\]\n\n- Those observations must contain sufficient non-missing highs for every required trailing-high calculation and non-missing closes for all smoothed nearness observations. A cross-sectional signal additionally requires at least two symbols with defined values on the same date.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(df, N_high=252, N_smooth=5):\n    import pandas as pd\n\n    x = df.sort_index(level=[\"symbol\", \"date\"])\n\n    trailing_high = (\n        x.groupby(level=\"symbol\")[\"high\"]\n        .rolling(window=N_high, min_periods=N_high)\n        .max()\n        .droplevel(0)\n    )\n\n    nearness = x[\"close\"].div(trailing_high).where(trailing_high.ne(0))\n\n    persistent_nearness = (\n        nearness.groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n    )\n\n    cross_sectional_rank = persistent_nearness.groupby(level=\"date\").rank(\n        method=\"average\",\n        ascending=True\n    )\n    cross_sectional_count = persistent_nearness.groupby(level=\"date\").transform(\n        \"count\"\n    )\n\n    alpha = (\n        2 * (cross_sectional_rank - 1) / (cross_sectional_count - 1) - 1\n    ).where(cross_sectional_count.gt(1))\n\n    return alpha.reindex(df.index).rename(\"alpha\")\n```",
+    "response_sha256": "6974ca4ae0789e6d015af70640ab91d1009c83710d434bcf90d227840a0e1c33",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 1003,
+            "output_tokens": 2632,
+            "total_tokens": 3635
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

@@ -1,0 +1,49 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_310a2d1a",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 489284302,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": null,
+        "theme": "liquidity",
+        "theme_title": "liquidity",
+        "timestamp_utc": "2026-08-25T08:29:17.245854+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 2,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "89ff8a589a60fe84cfe050d1d2f37f42ec91731c3952f24ffb0f9d937848b6f6",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "api_error"
+    },
+    "raw_response": null,
+    "response_sha256": null,
+    "validation_flags": null,
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 489284302,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "error_type": "ServerError",
+        "error_message": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+    }
+}

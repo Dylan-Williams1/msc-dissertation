@@ -1,0 +1,76 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_8047543a",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 1312298517,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_short",
+            "N_long",
+            "eps"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-25T08:30:30.815754+00:00",
+        "run_id": "run_20260825T082614Z",
+        "call_index": 3,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "6d2c4a851aa831f24feb9fa12ea309bc2d6ac572f68289658e289de6cde088c3",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- Formula Name: Differential Volume Asymmetry Index (DVAI)\n- Holding Period: 5 days\n- Orientation: Long/Short\n- Parameters:\n  - `N_short = 5` (Short-term volume asymmetry window)\n  - `N_long = 21` (Long-term volume asymmetry baseline window)\n  - `eps = 1e-8` (Numerical stability constant)\n- Required Inputs: `volume`, `returns`\n\n# Section 2: Mathematical Formulation\n\nFor asset $i$ on day $t$, daily volume $V_{i,t}$ is partitioned into positive-return volume $V_{i,t}^+$ and negative-return volume $V_{i,t}^-$ based on daily return $R_{i,t}$:\n\n$$V_{i,t}^+ = \\begin{cases} V_{i,t}, & R_{i,t} > 0 \\\\ 0, & R_{i,t} \\le 0 \\end{cases}$$\n\n$$V_{i,t}^- = \\begin{cases} V_{i,t}, & R_{i,t} < 0 \\\\ 0, & R_{i,t} \\ge 0 \\end{cases}$$\n\nFor a given rolling window parameter $N \\in \\{N_{short}, N_{long}\\}$, the Volume Asymmetry Ratio $VA_{i,t}(N)$ is defined as:\n\n$$VA_{i,t}(N) = \\frac{\\sum_{k=0}^{N-1} V_{i,t-k}^+ - \\sum_{k=0}^{N-1} V_{i,t-k}^-}{\\sum_{k=0}^{N-1} V_{i,t-k} + \\text{eps}}$$\n\nThe Differential Volume Asymmetry ($DVA$) isolates short-term volume imbalance relative to its long-term baseline:\n\n$$DVA_{i,t} = VA_{i,t}(N_{short}) - VA_{i,t}(N_{long})$$\n\nThe final signal $Z_{i,t}$ is the cross-sectional z-score of $DVA_{i,t}$ evaluated across all available assets $M_t$ on date $t$:\n\n$$Z_{i,t} = \\frac{DVA_{i,t} - \\mu_{t}(DVA)}{\\sigma_{t}(DVA) + \\text{eps}}$$\n\nwhere:\n\n$$\\mu_{t}(DVA) = \\frac{1}{M_t} \\sum_{i=1}^{M_t} DVA_{i,t}$$\n\n$$\\sigma_{t}(DVA) = \\sqrt{\\frac{1}{M_t} \\sum_{i=1}^{M_t} \\left(DVA_{i,t} - \\mu_{t}(DVA)\\right)^2}$$\n\n**Handling of Undefined Values and Windowing:**\n- Rolling sum calculations require a strict minimum period of observations equal to the lookback parameter ($N_{short}$ and $N_{long}$). If an asset has fewer than $N_{long}$ trailing observations, $VA_{i,t}(N_{long})$ evaluates to NaN.\n- Any missing daily observation for volume or returns results in a NaN output for the rolling window.\n- Division by zero is mitigated across all ratios by adding the scalar parameter `eps`.\n- Cross-sectional standard deviation $\\sigma_t(DVA)$ requires at least 2 valid asset observations per date; otherwise, $Z_{i,t}$ evaluates to NaN for that date.\n\n# Section 3: Causal Rationale\n\nTrading volume serves as an observable proxy for market liquidity consumption and institutional order execution flow. Volume asymmetry quantifies the proportion of trading volume associated with positive return days versus negative return days over a specified window. When short-term volume asymmetry significantly exceeds its long-term baseline, it indicates a sudden concentration of buying pressure that absorbs available ask liquidity. Conversely, a negative differential signals persistent institutional distribution where aggressive selling absorbs bid liquidity on down days. Cross-sectional z-scoring isolates relative volume imbalance across the universe while maintaining market-neutral posture.\n\n# Section 4: Structural Bounds\n\n- **Data Integrity:** The alpha relies exclusively on Point-in-Time (PIT) daily OHLCV and returns data without any external or non-PIT inputs.\n- **Execution Rule:** Signal generation uses market data available up to and including the close of day $t$. All portfolio rebalancing occurs at the OPEN of day $t+1$. The formulation contains no forward-looking terms or negative time shifts.\n- **Minimum History:** A minimum of $N_{long} = 21$ trailing trading days of consecutive observations per asset is required before the signal produces a non-NaN value.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df, N_short=5, N_long=21, eps=1e-8):\n    vol = df[\"volume\"]\n    ret = df[\"returns\"]\n\n    vol_pos = vol.where(ret > 0, 0.0)\n    vol_neg = vol.where(ret < 0, 0.0)\n\n    vol_pos_short = vol_pos.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_short, min_periods=N_short).sum()\n    )\n    vol_neg_short = vol_neg.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_short, min_periods=N_short).sum()\n    )\n    vol_tot_short = vol.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_short, min_periods=N_short).sum()\n    )\n\n    va_short = (vol_pos_short - vol_neg_short) / (vol_tot_short + eps)\n\n    vol_pos_long = vol_pos.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_long, min_periods=N_long).sum()\n    )\n    vol_neg_long = vol_neg.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_long, min_periods=N_long).sum()\n    )\n    vol_tot_long = vol.groupby(level=\"symbol\").transform(\n        lambda x: x.rolling(window=N_long, min_periods=N_long).sum()\n    )\n\n    va_long = (vol_pos_long - vol_neg_long) / (vol_tot_long + eps)\n\n    dva = va_short - va_long\n\n    mean_dva = dva.groupby(level=\"date\").transform(\"mean\")\n    std_dva = dva.groupby(level=\"date\").transform(\"std\")\n\n    alpha = (dva - mean_dva) / (std_dva + eps)\n\n    return alpha\n```",
+    "response_sha256": "a1f4b2b2e02cdd0347b864bd51c7985852623789826c374330c12abf11bf6848",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_short",
+            "N_long",
+            "eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 1312298517,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1030,
+            "output_tokens": 1555,
+            "total_tokens": 8576
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

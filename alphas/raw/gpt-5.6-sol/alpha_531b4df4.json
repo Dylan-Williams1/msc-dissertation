@@ -1,0 +1,103 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_531b4df4",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_rev",
+            "N_risk",
+            "N_volume",
+            "N_cs_min"
+        ],
+        "theme": "short_term_reversal",
+        "theme_title": "short-term reversal",
+        "timestamp_utc": "2026-08-21T00:07:43.071729+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 5,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 544188757,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "aa1821354477bc62683907e94e055f667d8a50f8b36e2b0d4f8b29a59e2cfbcb",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Amplified Volatility-Normalized Short-Term Reversal\n- **Holding Period:** 3 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_rev = 3`: lookback in trading observations for the short-term price move\n  - `N_risk = 20`: lookback for return root-mean-square normalization\n  - `N_volume = 20`: lookback for average volume\n  - `N_cs_min = 20`: minimum number of valid symbols required for cross-sectional ranking\n- **Required Inputs:** `close`, `volume`, `returns`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let:\n\n- \\(C_{i,t}\\) be the closing price.\n- \\(V_{i,t}\\) be volume.\n- \\(r_{i,t}\\) be the supplied daily return.\n\nDefine the short-term price move:\n\n\\[\nM_{i,t}\n=\n\\frac{C_{i,t}}{C_{i,t-N_{\\mathrm{rev}}}}-1.\n\\]\n\nDefine trailing return root-mean-square risk:\n\n\\[\n\\sigma_{i,t}\n=\n\\sqrt{\n\\frac{1}{N_{\\mathrm{risk}}}\n\\sum_{k=0}^{N_{\\mathrm{risk}}-1}r_{i,t-k}^{2}\n}.\n\\]\n\nDefine trailing average volume:\n\n\\[\n\\overline{V}_{i,t}\n=\n\\frac{1}{N_{\\mathrm{volume}}}\n\\sum_{k=0}^{N_{\\mathrm{volume}}-1}V_{i,t-k}.\n\\]\n\nDefine the contemporaneous relative-volume amplification term:\n\n\\[\nL_{i,t}\n=\n\\log\\left(\n1+\\frac{V_{i,t}}{\\overline{V}_{i,t}}\n\\right).\n\\]\n\nThe raw reversal score is:\n\n\\[\nS_{i,t}\n=\n-\\frac{M_{i,t}}{\\sigma_{i,t}}L_{i,t}.\n\\]\n\nThus, recent negative moves produce positive scores, while recent positive moves produce negative scores. Let \\(R_{i,t}\\) be the ascending average-tie rank of \\(S_{i,t}\\) among all valid symbols on date \\(t\\), and let \\(n_t\\) be the number of valid raw scores on that date. The final alpha is:\n\n\\[\n\\alpha_{i,t}\n=\n2\\frac{R_{i,t}-1}{n_t-1}-1,\n\\]\n\nprovided \\(n_t \\geq N_{\\mathrm{cs\\_min}}\\). Larger raw reversal scores therefore map to larger positive alpha values.\n\nEach rolling window requires exactly its full declared number of observations; missing values inside a window are not skipped or imputed. The signal is undefined when either required close is missing or nonpositive, current volume is missing or negative, \\(\\overline{V}_{i,t}\\leq 0\\), or \\(\\sigma_{i,t}\\leq 0\\). Non-finite intermediate values are converted to undefined values, and cross-sectional ranking excludes undefined values. If \\(n_t<N_{\\mathrm{cs\\_min}}\\), the alpha is undefined for every symbol on date \\(t\\).\n\n## Section 3: Causal Rationale\n\nLarge short-horizon price changes can reflect temporary directional trading pressure, proxied here by the signed close-to-close move. Reversing the sign targets subsequent correction after that pressure dissipates, while RMS normalization distinguishes an unusual move from ordinary variation for the same symbol. Relative volume amplifies observations where the directional move coincides with unusually intensive trading, using current volume relative to its trailing average as the explicit OHLCV proxy. Cross-sectional ranking limits sensitivity to the absolute scale and extreme magnitude of individual raw scores.\n\n## Section 4: Structural Bounds\n\n- The formulation relies solely on Point-in-Time (PIT) daily `close`, `volume`, and `returns` data drawn from the permitted OHLCV and returns fields.\n- The signal for day \\(t\\) is generated after the market close using only information available up to and including that close.\n- Execution occurs at the **open of day \\(t+1\\)**. The formulation complies with this rule and contains no forward shifts or future data.\n- The minimum trailing history is:\n\n\\[\n\\max\\left(N_{\\mathrm{rev}}+1,\\;N_{\\mathrm{risk}},\\;N_{\\mathrm{volume}}\\right)\n\\]\n\nvalid symbol observations, which equals \\(20\\) observations under the default parameters. These observations must include a valid current close, the close from \\(N_{\\mathrm{rev}}\\) observations earlier, \\(N_{\\mathrm{risk}}\\) consecutive valid returns, and \\(N_{\\mathrm{volume}}\\) consecutive valid volume observations.\n- At least `N_cs_min = 20` valid symbol-level raw scores must also be available on a date for the cross-sectional alpha to be defined.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(\n    df,\n    N_rev=3,\n    N_risk=20,\n    N_volume=20,\n    N_cs_min=20\n):\n    import numpy as np\n    import pandas as pd\n\n    x = df.sort_index()\n    symbol_groups = x.groupby(level=\"symbol\", sort=False)\n\n    lagged_close = symbol_groups[\"close\"].shift(N_rev)\n    short_move = x[\"close\"].div(lagged_close).sub(1)\n\n    rms_return = (\n        x[\"returns\"]\n        .pow(2)\n        .groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_risk, min_periods=N_risk)\n        .mean()\n        .droplevel(0)\n        .pow(0.5)\n    )\n\n    average_volume = (\n        x[\"volume\"]\n        .groupby(level=\"symbol\", sort=False)\n        .rolling(window=N_volume, min_periods=N_volume)\n        .mean()\n        .droplevel(0)\n    )\n\n    valid = (\n        x[\"close\"].gt(0)\n        & lagged_close.gt(0)\n        & x[\"volume\"].ge(0)\n        & average_volume.gt(0)\n        & rms_return.gt(0)\n    )\n\n    volume_amplifier = np.log1p(x[\"volume\"].div(average_volume))\n    raw_score = short_move.div(rms_return).mul(volume_amplifier).mul(-1)\n    raw_score = raw_score.where(valid)\n    raw_score = raw_score.replace([np.inf, -np.inf], np.nan)\n\n    cross_sectional_rank = raw_score.groupby(level=\"date\").rank(\n        method=\"average\",\n        ascending=True\n    )\n    cross_sectional_count = (\n        raw_score.notna()\n        .groupby(level=\"date\")\n        .transform(\"sum\")\n    )\n\n    alpha = (\n        cross_sectional_rank.sub(1)\n        .mul(2)\n        .div(cross_sectional_count.sub(1))\n        .sub(1)\n    )\n    alpha = alpha.where(\n        cross_sectional_count.ge(N_cs_min)\n        & cross_sectional_count.gt(1)\n    )\n    alpha = alpha.reindex(df.index)\n    alpha.name = \"alpha\"\n    return alpha\n```",
+    "response_sha256": "cc235cefe60ee2273ef80b81adaaffc05e64f0cd79a67cfd77b0c2716049ecfa",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_rev",
+            "N_risk",
+            "N_volume",
+            "N_cs_min"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 998,
+            "output_tokens": 4072,
+            "total_tokens": 5070
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

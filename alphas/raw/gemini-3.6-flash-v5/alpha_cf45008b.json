@@ -1,0 +1,80 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_cf45008b",
+        "model": "gemini-3.6-flash",
+        "provider": "Google",
+        "model_knowledge_cutoff": "2026-03",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": 0.9,
+        "seed": 489284302,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_mom",
+            "N_vol",
+            "N_vol_volume",
+            "N_smooth",
+            "epsilon"
+        ],
+        "theme": "momentum",
+        "theme_title": "momentum",
+        "timestamp_utc": "2026-08-24T18:26:32.449360+00:00",
+        "run_id": "run_20260824T182335Z",
+        "call_index": 2,
+        "n_samples_per_prompt": 1,
+        "thinking_level_requested": "medium",
+        "thinking_level_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "a985d8c53c76da0f59883a16fe2595b2a9990055ef47160f7ac63777bc389aa2",
+        "theme_spec_sha256": "0e8752078ff5cda313436ee7c41b63a02bcc1da246c6c6d9061047df0813f693",
+        "model_knowledge_cutoff_lower": "2025-01",
+        "model_knowledge_cutoff_upper": "2026-03",
+        "model_knowledge_cutoff_source": "https://deepmind.google/models/model-cards/gemini-3-6-flash/",
+        "model_knowledge_cutoff_source_type": "official_model_card",
+        "model_knowledge_cutoff_retrieved_utc": "2026-07-30",
+        "sdk_version": "2.14.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name**: Volatility_Adjusted_Volume_Confirmed_Momentum\n- **Holding Period**: 5 days\n- **Orientation**: Long/Short\n- **Parameters**:\n  - `N_mom` = 21\n  - `N_vol` = 63\n  - `N_vol_volume` = 21\n  - `N_smooth` = 5\n  - `epsilon` = 1e-8\n- **Required Inputs**: `close`, `volume`, `returns`\n\n---\n\n# Section 2: Mathematical Formulation\n\nLet $C_{i,t}$ denote the closing price of asset $i$ on day $t$, $V_{i,t}$ denote its trading volume, and $r_{i,t}$ denote its daily return.\n\n1. **Cumulative Price Momentum**:\n   $$R_{i,t} = \\frac{C_{i,t}}{C_{i, t - N_{mom}}} - 1$$\n\n2. **Rolling Daily Volatility**:\n   $$\\sigma_{i,t} = \\sqrt{\\frac{1}{N_{vol}-1} \\sum_{k=0}^{N_{vol}-1} \\left(r_{i, t-k} - \\bar{r}_{i,t}\\right)^2}$$\n   where $\\bar{r}_{i,t} = \\frac{1}{N_{vol}} \\sum_{k=0}^{N_{vol}-1} r_{i, t-k}$.\n\n3. **Volatility-Normalized Momentum**:\n   $$M_{i,t} = \\frac{R_{i,t}}{\\sigma_{i,t} \\cdot \\sqrt{N_{mom}} + \\epsilon}$$\n\n4. **Relative Volume Ratio**:\n   $$\\overline{V}_{i,t} = \\frac{1}{N_{vol\\_volume}} \\sum_{k=0}^{N_{vol\\_volume}-1} V_{i, t-k}$$\n   $$VR_{i,t} = \\frac{V_{i,t}}{\\overline{V}_{i,t} + \\epsilon}$$\n\n5. **Smoothed Volume Confirmation**:\n   Let $SVR_{i,t}$ be the Exponential Moving Average (EMA) of $VR_{i,t}$ over a span of $N_{smooth}$ days:\n   $$SVR_{i,t} = \\alpha \\cdot VR_{i,t} + (1 - \\alpha) \\cdot SVR_{i,t-1}, \\quad \\alpha = \\frac{2}{N_{smooth} + 1}$$\n\n6. **Unstandardized Signal**:\n   $$\\alpha^{raw}_{i,t} = M_{i,t} \\cdot SVR_{i,t}$$\n\n7. **Cross-Sectional Z-Score**:\n   $$\\alpha_{i,t} = \\frac{\\alpha^{raw}_{i,t} - \\mu_t(\\alpha^{raw})}{\\sigma_t(\\alpha^{raw}) + \\epsilon}$$\n   where $\\mu_t(\\alpha^{raw})$ and $\\sigma_t(\\alpha^{raw})$ are the cross-sectional mean and standard deviation across all valid assets on day $t$.\n\n**Handling of Undefined Values**:\n- Rolling daily volatility requires a minimum of $N_{vol}$ valid observations; if fewer are present, $\\sigma_{i,t}$ evaluates to undefined (NaN).\n- Rolling volume SMA requires a minimum of $N_{vol\\_volume}$ valid observations; if fewer are present, $\\overline{V}_{i,t}$ evaluates to undefined (NaN).\n- Potential division by zero in volatility normalization, relative volume, and cross-sectional z-scoring is explicitly prevented by adding $\\epsilon = 10^{-8}$.\n- Cross-sectional z-scoring ignores NaN values when computing daily means and standard deviations, leaving the resulting alpha output as NaN for assets with insufficient observation history.\n\n---\n\n# Section 3: Causal Rationale\n\nAsset price momentum reflects underreaction to persistent fundamental information or sustained directional order flow. Normalizing nominal returns by historical volatility standardizes the trend signal relative to structural noise, isolating statistically meaningful price shifts from random fluctuations. Incorporating volume confirmation serves as a proxy for institutional trading density, as price advances accompanied by elevated relative volume reflect broader market participation and higher trend persistence than price movements occurring on low volume.\n\n---\n\n# Section 4: Structural Bounds\n\n- **Point-in-Time Confirmation**: All calculations rely strictly on Point-in-Time daily OHLCV and return data available at the market close of day $t$.\n- **Execution Timing Rule**: The signal $\\alpha_{i,t}$ is evaluated at the close of trading day $t$ using data up to and including day $t$, and positions are executed at the OPEN of trading day $t+1$.\n- **Minimum Observation Requirement**: The signal requires a minimum history of $\\max(N_{mom}, N_{vol}, N_{vol\\_volume}) = 63$ trailing trading days per symbol before yielding non-NaN values.\n\n---\n\n# Section 5: Python Implementation\n\n```python\nimport pandas as pd\nimport numpy as np\n\ndef generate_alpha(df, N_mom=21, N_vol=63, N_vol_volume=21, N_smooth=5, epsilon=1e-8):\n    close_lag = df.groupby(level='symbol')['close'].shift(N_mom)\n    R = (df['close'] / close_lag) - 1.0\n\n    vol = df.groupby(level='symbol')['returns'].transform(\n        lambda x: x.rolling(window=N_vol, min_periods=N_vol).std()\n    )\n\n    M = R / (vol * np.sqrt(N_mom) + epsilon)\n\n    vol_sma = df.groupby(level='symbol')['volume'].transform(\n        lambda x: x.rolling(window=N_vol_volume, min_periods=N_vol_volume).mean()\n    )\n    VR = df['volume'] / (vol_sma + epsilon)\n\n    SVR = VR.groupby(level='symbol').transform(\n        lambda x: x.ewm(span=N_smooth, adjust=False).mean()\n    )\n\n    raw_alpha = M * SVR\n\n    mean_raw = raw_alpha.groupby(level='date').transform('mean')\n    std_raw = raw_alpha.groupby(level='date').transform('std')\n\n    alpha = (raw_alpha - mean_raw) / (std_raw + epsilon)\n\n    return alpha\n```",
+    "response_sha256": "c7eb86cc87caf3d5299d5bfbc7406105173d3ef8d4477c0533a35d2af63e4ea4",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_mom",
+            "N_vol",
+            "N_vol_volume",
+            "N_smooth",
+            "epsilon"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": 0.9,
+        "seed": 489284302,
+        "tools": [],
+        "thinking_level": "medium"
+    },
+    "api_response_audit": {
+        "finish_reason": "FinishReason.STOP",
+        "usage": {
+            "prompt_tokens": 1029,
+            "output_tokens": 1445,
+            "total_tokens": 5866
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        }
+    }
+}

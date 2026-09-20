@@ -1,0 +1,115 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_7514b4e5",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_long",
+            "N_skip",
+            "N_short",
+            "N_vol",
+            "N_turn",
+            "N_turn_short",
+            "N_smooth",
+            "w_short",
+            "w_vol",
+            "min_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "theme": "long_term_reversal",
+        "theme_title": "long-term reversal",
+        "timestamp_utc": "2026-08-20T23:36:01.548574+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 6,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1807105615,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "7897b46d025c1a57d269c5acaac1ce9fa9e52fb1c4a5361f680638372ce114a9",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Discounted Long-Horizon Reversal with Short-Term Momentum Neutralisation (LTR-VD)\n- **Holding Period:** 21 trading days (monthly rebalance horizon; signal recomputed daily)\n- **Orientation:** Long/Short, cross-sectionally dollar-neutral by construction (cross-sectional demeaned rank score)\n- **Parameters:**\n  - `N_long = 252` \u2014 long-horizon formation window (days) used to measure the reversal leg\n  - `N_skip = 21` \u2014 recent window skipped from the formation period to avoid short-term momentum contamination\n  - `N_short = 21` \u2014 short-horizon window whose return is neutralised out of the score\n  - `N_vol = 252` \u2014 window for realised daily-return volatility used to risk-normalise the formation return\n  - `N_turn = 252` \u2014 window for average dollar volume used to build the attention/liquidity discount\n  - `N_turn_short = 21` \u2014 short window for recent dollar volume in the volume-pressure ratio\n  - `N_smooth = 5` \u2014 smoothing window applied to the final cross-sectional score\n  - `w_short = 0.5` \u2014 weight on the short-horizon momentum-neutralisation leg\n  - `w_vol = 0.25` \u2014 weight on the volume-pressure discount leg\n  - `min_frac = 0.8` \u2014 minimum fraction of a rolling window that must be observed for the statistic to be defined\n  - `eps = 1e-12` \u2014 numerical floor preventing division by zero\n  - `winsor_z = 3.0` \u2014 symmetric clip level applied to standardised legs prior to combination\n- **Required Inputs:** `close`, `volume`, `returns` (all daily, point-in-time). No other inputs.\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. Let $P_{i,t}$ denote `close`, $V_{i,t}$ denote `volume`, and $r_{i,t}$ denote `returns` (simple daily total return).\n\n**Step 1 \u2014 Skipped long-horizon formation return.**\n\n$$\nR^{\\text{form}}_{i,t} \\;=\\; \\frac{P_{i,t-N_{skip}}}{P_{i,t-N_{long}}} \\;-\\; 1\n$$\n\nThis measures cumulative price change from $t-N_{long}$ to $t-N_{skip}$, deliberately excluding the most recent `N_skip` days.\n\n**Step 2 \u2014 Risk normalisation of the formation return.**\n\n$$\n\\sigma_{i,t} \\;=\\; \\operatorname{sd}\\!\\big(\\{r_{i,s}\\}_{s=t-N_{vol}+1}^{t}\\big), \\qquad\n\\tilde R_{i,t} \\;=\\; \\frac{R^{\\text{form}}_{i,t}}{\\sqrt{N_{long}-N_{skip}}\\;\\sigma_{i,t} \\;+\\; \\varepsilon}\n$$\n\nwhere $\\varepsilon = $ `eps`. Dividing by $\\sqrt{N_{long}-N_{skip}}\\,\\sigma_{i,t}$ expresses the formation move in units of its own diffusive scale, so that high- and low-volatility names contribute comparably.\n\n**Step 3 \u2014 Short-horizon return (momentum-neutralisation leg).**\n\n$$\nR^{\\text{short}}_{i,t} \\;=\\; \\frac{P_{i,t}}{P_{i,t-N_{short}}} \\;-\\; 1\n$$\n\n**Step 4 \u2014 Volume-pressure ratio (attention discount).**\n\n$$\nD_{i,t} \\;=\\; P_{i,t}\\,V_{i,t}, \\qquad\n\\bar D^{S}_{i,t} \\;=\\; \\frac{1}{N_{turn\\_short}}\\sum_{s=t-N_{turn\\_short}+1}^{t} D_{i,s}, \\qquad\n\\bar D^{L}_{i,t} \\;=\\; \\frac{1}{N_{turn}}\\sum_{s=t-N_{turn}+1}^{t} D_{i,s}\n$$\n\n$$\nU_{i,t} \\;=\\; \\ln\\!\\left(\\frac{\\bar D^{S}_{i,t} + \\varepsilon}{\\bar D^{L}_{i,t} + \\varepsilon}\\right)\n$$\n\n$U_{i,t}$ is a positive number when recent traded dollar volume is elevated relative to its own one-year norm.\n\n**Step 5 \u2014 Cross-sectional standardisation.** For any cross-sectional variable $X_{i,t}$ define, over the set $\\mathcal{S}_t$ of symbols with $X_{i,t}$ defined on date $t$ (with $|\\mathcal{S}_t| \\ge 2$),\n\n$$\nz_t[X]_i \\;=\\; \\operatorname{clip}\\!\\left(\\frac{X_{i,t} - \\mu_t(X)}{s_t(X) + \\varepsilon},\\; -c,\\; +c\\right), \\qquad c = \\texttt{winsor\\_z}\n$$\n\nwith $\\mu_t(X)$ the cross-sectional mean and $s_t(X)$ the cross-sectional standard deviation on date $t$. If $|\\mathcal{S}_t| < 2$, $z_t[X]_i$ is undefined for that date.\n\n**Step 6 \u2014 Raw composite score.**\n\n$$\nA_{i,t} \\;=\\; -\\,z_t\\big[\\tilde R\\big]_i \\;-\\; w_{short}\\, z_t\\big[R^{\\text{short}}\\big]_i \\;-\\; w_{vol}\\, z_t\\big[U\\big]_i\n$$\n\nThe leading negative sign is the reversal orientation: large risk-adjusted gains over the prior year (ex the last month) receive negative weight. The second term removes the residual one-month drift so the score is not an accidental short-term reversal bet mixed with the long-term effect; it enters with the same sign, i.e. recent one-month winners are also down-weighted. The third term discounts names whose recent dollar volume is abnormally high relative to its own annual level.\n\n**Step 7 \u2014 Temporal smoothing.**\n\n$$\n\\hat A_{i,t} \\;=\\; \\frac{1}{N_{smooth}}\\sum_{s=t-N_{smooth}+1}^{t} A_{i,s}\n$$\n\n**Step 8 \u2014 Final cross-sectional neutralisation.**\n\n$$\n\\text{Alpha}_{i,t} \\;=\\; \\hat A_{i,t} \\;-\\; \\mu_t\\!\\left(\\hat A\\right)\n$$\n\nso the signal sums to zero across the cross-section on every date.\n\n**Handling of undefined values (explicit).**\n\n- Every rolling window in Steps 2, 4 and 7 requires at least $\\lceil \\texttt{min\\_frac} \\times W \\rceil$ observations, where $W$ is that window's length; otherwise the statistic is undefined (NaN) and propagates.\n- Lagged-price ratios in Steps 1 and 3 are undefined when the required lagged close is missing; no interpolation is performed.\n- All divisions are protected by the additive floor $\\varepsilon =$ `eps` in the denominator, as written above. Where a denominator is a standard deviation that is exactly zero, the ratio is finite only through $\\varepsilon$; the subsequent `winsor_z` clip in Step 5 bounds the result.\n- Non-finite intermediate values ($\\pm\\infty$) arising from any source are treated as undefined (NaN) before cross-sectional standardisation and are excluded from the cross-sectional mean and standard deviation.\n- Cross-sectional statistics on a date are computed only over symbols with defined values; symbols with undefined values retain NaN and carry no position.\n- No other imputation, filling, or clipping is performed.\n\n# Section 3: Causal Rationale\n\nOver horizons of roughly one to three years, prices that have drifted far from a stock's own longer-run valuation anchor tend to drift back, because the extrapolative expectations embedded in a multi-year run-up or drawdown are eventually confronted with realised fundamentals; the observable proxy for that displacement here is the cumulative close-to-close return over `N_long` days. Scaling that displacement by trailing realised daily-return volatility (`N_vol`) converts a raw price move into a move measured in the stock's own risk units, so the ranking reflects how *unusual* the multi-year move is rather than simply which names are volatile. The last `N_skip` days are excluded from the formation window and the one-month return is separately subtracted, because short-horizon price continuation and bid\u2013ask/microstructure bounce operate with the opposite sign to the long-horizon effect and would otherwise dilute or invert the signal. The dollar-volume ratio $U$ compares recent traded dollar value to its own annual average and serves as the OHLCV-observable proxy for elevated attention and crowding; names currently trading far above their own volume norm are more likely still in the middle of a repricing event, so the reversal claim is discounted for them. Smoothing over `N_smooth` days and cross-sectional demeaning ensure the resulting exposure is a slow-moving, market-neutral tilt toward risk-adjusted long-horizon losers that are not simultaneously short-term winners or unusually heavily traded.\n\n# Section 4: Structural Bounds\n\n- **Data:** The strategy uses exclusively point-in-time daily OHLCV data (`close`, `volume`) and daily `returns`. No fundamentals, no analyst data, no index membership, no restated or survivorship-adjusted series are used. Prices must be split- and dividend-adjusted consistently in a PIT manner; `returns` must be the total return realised on day $t$ and known at the close of day $t$.\n- **Execution timing (fixed rule):** The signal for date $t$ is computed using data available up to and including the market close of day $t$, and is executed at the **OPEN of day $t+1$**. Every term in Section 2 is a function of $\\{P_{i,s}, V_{i,s}, r_{i,s}\\}_{s \\le t}$ only; no term references any quantity dated after $t$. The formulation therefore complies with this rule. The implementation returns the signal aligned to date $t$ and applies **no** forward shift; the one-day execution lag is applied by the backtesting harness.\n- **Minimum trailing observations:** The binding constraint is the formation window of Step 1, which requires the close at $t-N_{long}$, together with the `N_vol` and `N_turn` rolling windows at `min_frac` coverage and the `N_smooth` smoothing. The signal is first defined for a symbol on the trading day with index\n\n  $$\n  N_{long} + N_{smooth} \\;=\\; 252 + 5 \\;=\\; 257\n  $$\n\n  trailing daily observations (i.e. 257 observations including the current day; 256 strictly prior). Symbols with fewer observations produce NaN and take no position.\n- **Cross-section:** At least 2 symbols with defined values are required on a date for the cross-sectional standardisation and demeaning to be defined; in practice a cross-section of several hundred names is assumed for stable ranking.\n- **Capacity / turnover:** Signal turnover is low by construction (a 252-day formation window smoothed over 5 days), consistent with the stated 21-day holding period. The strategy is dollar-neutral each date but is not explicitly beta-, sector-, or size-neutral; residual exposure to those factors is not controlled within this specification.\n- **Universe caveats:** No price or liquidity screen is embedded in the formula. Application to very low-priced or thinly traded names may make the `close`-based return terms unreliable; universe filtering is left to the harness.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_long=252,\n                   N_skip=21,\n                   N_short=21,\n                   N_vol=252,\n                   N_turn=252,\n                   N_turn_short=21,\n                   N_smooth=5,\n                   w_short=0.5,\n                   w_vol=0.25,\n                   min_frac=0.8,\n                   eps=1e-12,\n                   winsor_z=3.0):\n\n    df = df.sort_index()\n\n    close = df['close']\n    volume = df['volume']\n    rets = df['returns']\n\n    g_close = close.groupby(level='symbol')\n\n    # Step 1: skipped long-horizon formation return\n    close_skip = g_close.shift(N_skip)\n    close_long = g_close.shift(N_long)\n    R_form = close_skip / close_long - 1.0\n\n    # Step 2: risk normalisation\n    sigma = rets.groupby(level='symbol').rolling(\n        window=N_vol, min_periods=int(np.ceil(min_frac * N_vol))\n    ).std().reset_index(level=0, drop=True).reindex(df.index)\n    R_tilde = R_form / (np.sqrt(N_long - N_skip) * sigma + eps)\n\n    # Step 3: short-horizon return\n    close_short = g_close.shift(N_short)\n    R_short = close / close_short - 1.0\n\n    # Step 4: volume-pressure ratio\n    dollar = close * volume\n    g_dollar = dollar.groupby(level='symbol')\n    D_s = g_dollar.rolling(\n        window=N_turn_short, min_periods=int(np.ceil(min_frac * N_turn_short))\n    ).mean().reset_index(level=0, drop=True).reindex(df.index)\n    D_l = g_dollar.rolling(\n        window=N_turn, min_periods=int(np.ceil(min_frac * N_turn))\n    ).mean().reset_index(level=0, drop=True).reindex(df.index)\n    U = np.log((D_s + eps) / (D_l + eps))\n\n    # Non-finite -> undefined\n    legs = pd.DataFrame({'R_tilde': R_tilde, 'R_short': R_short, 'U': U},\n                        index=df.index)\n    legs = legs.replace([np.inf, -np.inf], np.nan)\n\n    # Step 5: cross-sectional standardisation with symmetric clip\n    z = {}\n    for col in ['R_tilde', 'R_short', 'U']:\n        x = legs[col]\n        grp = x.groupby(level='date')\n        mu = grp.transform('mean')\n        sd = grp.transform('std')\n        cnt = grp.transform('count')\n        zi = (x - mu) / (sd + eps)\n        zi = zi.clip(lower=-winsor_z, upper=winsor_z)\n        zi = zi.where(cnt >= 2)\n        z[col] = zi\n\n    # Step 6: raw composite score\n    A = -z['R_tilde'] - w_short * z['R_short'] - w_vol * z['U']\n\n    # Step 7: temporal smoothing\n    A_hat = A.groupby(level='symbol').rolling(\n        window=N_smooth, min_periods=int(np.ceil(min_frac * N_smooth))\n    ).mean().reset_index(level=0, drop=True).reindex(df.index)\n\n    # Step 8: final cross-sectional demeaning\n    alpha = A_hat - A_hat.groupby(level='date').transform('mean')\n\n    alpha.name = 'alpha_ltr_vd'\n    return alpha\n```",
+    "response_sha256": "52a93ec24744a5fd2c8f53e45b135bb15fb968911dbf94ff89a51ea81667a172",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_long",
+            "N_skip",
+            "N_short",
+            "N_vol",
+            "N_turn",
+            "N_turn_short",
+            "N_smooth",
+            "w_short",
+            "w_vol",
+            "min_frac",
+            "eps",
+            "winsor_z"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip",
+            "replace",
+            "np.inf"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1627,
+            "output_tokens": 5191,
+            "total_tokens": 6818
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}

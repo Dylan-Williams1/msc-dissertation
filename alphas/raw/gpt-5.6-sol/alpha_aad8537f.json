@@ -1,0 +1,96 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_aad8537f",
+        "model": "gpt-5.6-sol",
+        "provider": "OpenAI",
+        "model_knowledge_cutoff": "2026-02",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_high",
+            "N_smooth"
+        ],
+        "theme": "nearness_to_the_52_week_high",
+        "theme_title": "nearness to the 52-week high",
+        "timestamp_utc": "2026-08-21T00:24:56.525042+00:00",
+        "run_id": "run_20260821T000003Z",
+        "call_index": 20,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1056511211,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "c1d1ebf743780e72a341430069d10f86bd67d317421340350e69b04c7977529b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-02",
+        "model_knowledge_cutoff_upper": "2026-02",
+        "model_knowledge_cutoff_source": "https://developers.openai.com/api/docs/models",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "3.3.1",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "## Section 1: Alpha Specification\n\n- **Formula Name:** Smoothed 52-Week-High Proximity Rank\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short\n- **Parameters:**\n  - `N_high = 252`: trailing window used to calculate the 52-week high\n  - `N_smooth = 5`: smoothing window for high proximity\n- **Required Inputs:** `high`, `close`\n\n## Section 2: Mathematical Formulation\n\nFor symbol \\(i\\) on trading day \\(t\\), let \\(H_{i,t}\\) and \\(C_{i,t}\\) denote the daily high and close.\n\n1. Calculate the trailing high:\n\n\\[\nM_{i,t}\n=\n\\max_{k=0,\\ldots,N_{\\text{high}}-1} H_{i,t-k}.\n\\]\n\n2. Calculate proximity to the trailing high:\n\n\\[\nP_{i,t}\n=\n\\frac{C_{i,t}}{M_{i,t}}.\n\\]\n\nIf \\(M_{i,t}\\) is zero or negative, \\(P_{i,t}\\) is undefined.\n\n3. Smooth the proximity measure:\n\n\\[\nS_{i,t}\n=\n\\frac{1}{N_{\\text{smooth}}}\n\\sum_{k=0}^{N_{\\text{smooth}}-1} P_{i,t-k}.\n\\]\n\n4. On each date, define \\(\\mathcal{U}_t\\) as the set of symbols with defined \\(S_{i,t}\\). Calculate the average-tie percentile rank:\n\n\\[\nR_{i,t}\n=\n\\operatorname{PercentileRank}_{j\\in\\mathcal{U}_t}(S_{j,t}).\n\\]\n\n5. Cross-sectionally center the rank:\n\n\\[\n\\alpha_{i,t}\n=\nR_{i,t}\n-\n\\frac{1}{|\\mathcal{U}_t|}\n\\sum_{j\\in\\mathcal{U}_t}R_{j,t}.\n\\]\n\nPositive values indicate long exposure and negative values indicate short exposure.\n\nThe trailing-high window requires `N_high` non-missing high observations. The smoothing window requires `N_smooth` non-missing proximity observations. Missing observations are not imputed and undefined values are excluded from cross-sectional ranking. No clipping or additional infinity handling is performed.\n\n## Section 3: Causal Rationale\n\nA close near the trailing 52-week high is an observable price-path proxy for persistent relative strength and limited reversal from recently achieved highs. Averaging proximity over several days distinguishes sustained nearness from a single intraday or closing spike. Prior highs can act as observable reference prices, so gradual adjustment around those levels can allow persistent price trends rather than immediate reversal. Cross-sectional centering expresses the mechanism as relative exposure, favoring symbols persistently nearest their trailing highs and shorting those furthest below them.\n\n## Section 4: Structural Bounds\n\nThe formulation relies solely on Point-in-Time daily `high` and `close` data drawn from the permitted OHLCV dataset. The signal for day \\(t\\) is generated after the market close using only information available up to and including day \\(t\\), and execution occurs at the open of day \\(t+1\\). The formulation complies with this timing rule and contains no forward shifts or future observations.\n\nWith complete data, the minimum number of trailing observations required for a symbol is:\n\n\\[\nN_{\\text{high}} + N_{\\text{smooth}} - 1 = 256.\n\\]\n\nMissing observations can increase the effective warm-up period.\n\n## Section 5: Python Implementation\n\n```python\ndef generate_alpha(df, N_high=252, N_smooth=5):\n    import pandas as pd\n\n    x = df.sort_index(level=[\"date\", \"symbol\"])\n\n    trailing_high = (\n        x[\"high\"]\n        .groupby(level=\"symbol\")\n        .rolling(window=N_high, min_periods=N_high)\n        .max()\n        .droplevel(0)\n    )\n\n    valid_trailing_high = trailing_high.where(trailing_high > 0)\n    proximity = x[\"close\"] / valid_trailing_high\n\n    smoothed_proximity = (\n        proximity\n        .groupby(level=\"symbol\")\n        .rolling(window=N_smooth, min_periods=N_smooth)\n        .mean()\n        .droplevel(0)\n    )\n\n    percentile_rank = smoothed_proximity.groupby(level=\"date\").rank(\n        method=\"average\",\n        pct=True\n    )\n    cross_sectional_mean = percentile_rank.groupby(level=\"date\").transform(\"mean\")\n    alpha = (percentile_rank - cross_sectional_mean).reindex(df.index)\n    alpha.name = \"alpha\"\n\n    return alpha\n```",
+    "response_sha256": "6f5041d7976a2086502ce2801727d4e6cdc344df0c8ad58bf9e71a64de583d5a",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_high",
+            "N_smooth"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "seed rejected by this model/endpoint",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "parity_mode": "effort",
+        "parity_sacrificed": "temperature (left at provider default)",
+        "fallbacks": [
+            "with_seed: SDK rejected argument (Responses.create() got an unexpected keyword argument 'seed')"
+        ],
+        "config_used": "no_seed"
+    },
+    "api_constraints": {
+        "parity_mode": "effort",
+        "temperature_supported": false,
+        "reasoning_used": true,
+        "constraint_note": "On GPT-5.x, temperature is accepted only when reasoning effort is none. The two controls are mutually exclusive; this is an API constraint, not a design choice.",
+        "sacrificed": "temperature (left at provider default)",
+        "seed_exposed": true,
+        "seed_note": "Seed is best-effort. Reproducibility breaks when the backend system_fingerprint changes; the fingerprint is recorded per call.",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "completed",
+        "usage": {
+            "prompt_tokens": 1003,
+            "output_tokens": 3828,
+            "total_tokens": 4831
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "system_fingerprint": null,
+        "sdk_version": "3.3.1"
+    }
+}

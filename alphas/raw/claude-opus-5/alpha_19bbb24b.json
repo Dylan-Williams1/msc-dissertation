@@ -1,0 +1,105 @@
+{
+    "metadata": {
+        "alpha_id": "alpha_19bbb24b",
+        "model": "claude-opus-5",
+        "provider": "Anthropic",
+        "model_knowledge_cutoff": "2026-05",
+        "retrieval_augmentation_enabled": false,
+        "interface": "API",
+        "temperature": null,
+        "seed": null,
+        "selection_applied": false,
+        "system_prompt_version": "v4.0",
+        "user_prompt_version": "v4.0",
+        "parameters": [
+            "N_ret",
+            "N_volbase",
+            "N_volshock",
+            "N_illiq",
+            "N_smooth",
+            "Min_obs",
+            "Z_clip",
+            "Eps"
+        ],
+        "theme": "trading_volume",
+        "theme_title": "trading volume",
+        "timestamp_utc": "2026-08-20T23:45:40.555264+00:00",
+        "run_id": "run_20260820T232838Z",
+        "call_index": 16,
+        "n_samples_per_prompt": 1,
+        "intended_call_seed": 1729617972,
+        "reasoning_effort_requested": "medium",
+        "reasoning_effort_applied": "medium",
+        "master_seed": 20260716,
+        "system_prompt_sha256": "ff3aeda1f6456aac7ff905e46706088c0e8784ebbdcb6377c0858ccb8d716456",
+        "user_prompt_sha256": "87a36e2071c858b540a55432c29a4c71ae4b8dc56366460c722bd179b4eca99b",
+        "theme_spec_sha256": "4bf187ddf0e9a28fd190b59292eaaedbf35fecfad6702bdfe071142052316fbd",
+        "model_knowledge_cutoff_lower": "2026-05",
+        "model_knowledge_cutoff_upper": "2026-05",
+        "model_knowledge_cutoff_source": "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "model_knowledge_cutoff_source_type": "official_model_docs",
+        "model_knowledge_cutoff_retrieved_utc": "2026-08-20",
+        "sdk_version": "1.0.0",
+        "python_version": "3.10.11",
+        "generation_status": "success"
+    },
+    "raw_response": "# Section 1: Alpha Specification\n\n- **Formula Name:** Volume-Shock Reversal Divergence (VSRD)\n- **Holding Period:** 5 trading days\n- **Orientation:** Long/Short, dollar-neutral cross-sectional signal\n- **Parameters:**\n  - `N_ret = 5` \u2014 lookback window (days) for the cumulative return move being evaluated for reversal\n  - `N_volbase = 60` \u2014 lookback window (days) for the baseline log-volume mean and standard deviation\n  - `N_volshock = 5` \u2014 window (days) over which the volume shock is averaged (matched to `N_ret`)\n  - `N_illiq = 20` \u2014 window (days) for the Amihud-style illiquidity/impact normaliser\n  - `N_smooth = 3` \u2014 smoothing window (days) applied to the final raw signal\n  - `Min_obs = 80` \u2014 minimum trailing daily observations per symbol before the signal is emitted\n  - `Z_clip = 4.0` \u2014 symmetric clip bound applied to the volume-shock z-score\n  - `Eps = 1e-12` \u2014 numerical floor used in all denominators\n- **Required Inputs:** `close`, `volume`, `returns` (all daily, point-in-time OHLCV fields)\n\n# Section 2: Mathematical Formulation\n\nLet $i$ index symbols and $t$ index trading days. All quantities are computed with information available at the close of day $t$.\n\n**Step 1 \u2014 Log volume and baseline.**\n\n$$v_{i,t} = \\ln\\left(1 + V_{i,t}\\right)$$\n\nwhere $V_{i,t}$ is the raw daily share volume. Define the trailing baseline over `N_volbase`:\n\n$$\\mu^{v}_{i,t} = \\frac{1}{N_{volbase}}\\sum_{k=0}^{N_{volbase}-1} v_{i,t-k}, \\qquad\n\\sigma^{v}_{i,t} = \\sqrt{\\frac{1}{N_{volbase}-1}\\sum_{k=0}^{N_{volbase}-1}\\left(v_{i,t-k}-\\mu^{v}_{i,t}\\right)^2}$$\n\nBoth require the full `N_volbase` observations (`min_periods = N_volbase`); otherwise undefined (NaN).\n\n**Step 2 \u2014 Daily volume-shock z-score, clipped.**\n\n$$z_{i,t} = \\mathrm{clip}\\!\\left(\\frac{v_{i,t}-\\mu^{v}_{i,t}}{\\sigma^{v}_{i,t}+\\varepsilon},\\; -Z_{clip},\\; +Z_{clip}\\right), \\qquad \\varepsilon = Eps$$\n\nThe $+\\varepsilon$ term is the explicit division-by-zero handling (constant-volume windows give $z\\to 0$).\n\n**Step 3 \u2014 Windowed volume shock.**\n\n$$Z_{i,t} = \\frac{1}{N_{volshock}}\\sum_{k=0}^{N_{volshock}-1} z_{i,t-k}$$\n\nwith `min_periods = N_volshock`.\n\n**Step 4 \u2014 Recent price move.**\n\nUsing the daily simple return $r_{i,t}$ (column `returns`), the cumulative log move over `N_ret`:\n\n$$R_{i,t} = \\sum_{k=0}^{N_{ret}-1}\\ln\\left(1+r_{i,t-k}\\right)$$\n\nwith `min_periods = N_ret`. Observations with $1+r_{i,t}\\le 0$ produce undefined values and are propagated as NaN (no imputation).\n\n**Step 5 \u2014 Impact normaliser (Amihud-style).**\n\n$$A_{i,t} = \\frac{1}{N_{illiq}}\\sum_{k=0}^{N_{illiq}-1} \\frac{|r_{i,t-k}|}{\\ln\\left(1+V_{i,t-k}\\,C_{i,t-k}\\right)+\\varepsilon}$$\n\nwhere $C_{i,t}$ is the closing price, so $V\\cdot C$ is dollar volume. `min_periods = N_illiq`.\n\nCross-sectionally standardise $A$ each day by its rank:\n\n$$a_{i,t} = \\frac{\\mathrm{rank}_{j\\in\\mathcal{U}_t}\\!\\left(A_{j,t}\\right)_i - 1}{\\left|\\mathcal{U}_t\\right| - 1} \\in [0,1]$$\n\nwhere $\\mathcal{U}_t$ is the set of symbols with $A_{j,t}$ defined on day $t$; if $|\\mathcal{U}_t| = 1$, set $a_{i,t}=0.5$. Ties receive the average rank.\n\n**Step 6 \u2014 Raw signal: reversal conditional on volume shock, scaled by impact.**\n\n$$s_{i,t} = -\\,\\mathrm{sign}\\!\\left(R_{i,t}\\right)\\cdot\\left|R_{i,t}\\right|\\cdot Z_{i,t}\\cdot\\left(0.5 + a_{i,t}\\right)\n\\;=\\; -\\,R_{i,t}\\cdot Z_{i,t}\\cdot\\left(0.5 + a_{i,t}\\right)$$\n\n**Step 7 \u2014 Smoothing.**\n\n$$\\tilde{s}_{i,t} = \\frac{1}{N_{smooth}}\\sum_{k=0}^{N_{smooth}-1} s_{i,t-k}$$\n\nwith `min_periods = N_smooth`.\n\n**Step 8 \u2014 Cross-sectional neutralisation.** For each date $t$, over the set $\\mathcal{V}_t$ of symbols with $\\tilde{s}_{i,t}$ defined:\n\n$$\\alpha_{i,t} = \\frac{\\tilde{s}_{i,t}-\\mathrm{median}_{j\\in\\mathcal{V}_t}\\left(\\tilde{s}_{j,t}\\right)}{\\mathrm{MAD}_t+\\varepsilon},\n\\qquad \\mathrm{MAD}_t = \\mathrm{median}_{j\\in\\mathcal{V}_t}\\left|\\tilde{s}_{j,t}-\\mathrm{median}_{k}\\left(\\tilde{s}_{k,t}\\right)\\right|$$\n\n**Step 9 \u2014 Availability gate.** $\\alpha_{i,t}$ is set to NaN unless symbol $i$ has at least `Min_obs` trailing daily observations (inclusive of $t$) in the panel.\n\n**Undefined-value handling (explicit):** all rolling windows enforce full `min_periods` as stated; all divisions carry the $+\\varepsilon$ floor; missing inputs propagate as NaN and are never filled; the only clipping is the $Z_{clip}$ bound in Step 2; the cross-sectional degenerate cases are handled as stated in Steps 5 and 8.\n\n# Section 3: Causal Rationale\n\nAbnormally heavy trading volume relative to a stock's own two-month baseline (Step 2) marks days on which a large quantity of shares changed hands, which mechanically requires liquidity providers to absorb one-sided demand; the compensation for that absorption is a temporary price concession that unwinds as inventory is redistributed. A multi-day price move accompanied by a large volume z-score is therefore more likely to contain a transitory liquidity-premium component than the same move on ordinary volume, where the drift is more plausibly information-driven and permanent. The signal shorts the recent move only in proportion to the size of the concurrent volume shock, so low-volume drifts receive near-zero weight and the alpha does not degenerate into unconditional short-term reversal. The Amihud-style term (Step 5) uses the observable ratio of absolute return to dollar volume as the proxy for how much price a given quantity of trading moves, and up-weights names where a fixed volume shock implies a larger concession and hence a larger expected snap-back. Smoothing and cross-sectional median/MAD standardisation keep the signal dollar-neutral and reduce sensitivity to single-day outliers in either price or volume.\n\n# Section 4: Structural Bounds\n\n- **Data:** The alpha uses only point-in-time daily `close`, `volume`, and `returns` from the OHLCV panel. No fundamentals, no analyst data, no intraday data, no survivorship-adjusted or restated series, no forward-filled corporate-action data beyond what the PIT daily bars already embed.\n- **Execution timing (fixed rule):** The signal for date $t$ is computed exclusively from data available up to and including the market close of day $t$, and the resulting position is executed at the **OPEN of day $t+1$**. Every term in Section 2 is a backward-looking rolling or same-day cross-sectional operation on data at or before $t$; no negative shifts, no forward fills across dates, and no use of day $t+1$ information appear anywhere. The formulation complies with this rule. The backtest harness \u2014 not the signal function \u2014 applies the one-day execution lag.\n- **Minimum trailing observations:** `Min_obs = 80` daily bars per symbol. This binds because the longest chain is `N_volbase = 60` (baseline) plus `N_volshock - 1 = 4` (shock averaging) plus `N_smooth - 1 = 2` (smoothing), i.e. 66 bars are strictly necessary; 80 is imposed as the conservative gate. Symbols with fewer trailing observations emit NaN.\n- **Other bounds:** the signal is cross-sectionally median/MAD-standardised each day and is intended for a dollar-neutral, roughly equal-gross-exposure book with an approximately 5-day holding period; it is undefined on days with a single valid symbol beyond the conventions stated in Section 2. It carries structural exposure to short-horizon reversal and to illiquidity, and requires that the traded universe be liquid enough that the day $t+1$ open is executable.\n\n# Section 5: Python Implementation\n\n```python\nimport numpy as np\nimport pandas as pd\n\n\ndef generate_alpha(df,\n                   N_ret=5,\n                   N_volbase=60,\n                   N_volshock=5,\n                   N_illiq=20,\n                   N_smooth=3,\n                   Min_obs=80,\n                   Z_clip=4.0,\n                   Eps=1e-12):\n\n    data = df.sort_index()\n\n    g = data.groupby(level='symbol')\n\n    # Step 1: log volume and trailing baseline\n    v = np.log1p(data['volume'])\n    vg = v.groupby(level='symbol')\n    mu_v = vg.rolling(N_volbase, min_periods=N_volbase).mean().reset_index(level=0, drop=True)\n    sd_v = vg.rolling(N_volbase, min_periods=N_volbase).std().reset_index(level=0, drop=True)\n\n    # Step 2: clipped daily volume-shock z-score\n    z = ((v - mu_v) / (sd_v + Eps)).clip(lower=-Z_clip, upper=Z_clip)\n\n    # Step 3: windowed volume shock\n    Z = z.groupby(level='symbol').rolling(N_volshock, min_periods=N_volshock).mean().reset_index(level=0, drop=True)\n\n    # Step 4: cumulative log move\n    logret = np.log1p(data['returns'])\n    R = logret.groupby(level='symbol').rolling(N_ret, min_periods=N_ret).sum().reset_index(level=0, drop=True)\n\n    # Step 5: Amihud-style impact normaliser\n    impact = data['returns'].abs() / (np.log1p(data['volume'] * data['close']) + Eps)\n    A = impact.groupby(level='symbol').rolling(N_illiq, min_periods=N_illiq).mean().reset_index(level=0, drop=True)\n\n    a_rank = A.groupby(level='date').rank(method='average')\n    a_cnt = A.groupby(level='date').transform('count')\n    a = (a_rank - 1.0) / (a_cnt - 1.0)\n    a = a.where(a_cnt > 1, 0.5)\n\n    # Step 6: raw signal\n    s = -R * Z * (0.5 + a)\n\n    # Step 7: smoothing\n    s_sm = s.groupby(level='symbol').rolling(N_smooth, min_periods=N_smooth).mean().reset_index(level=0, drop=True)\n\n    # Step 8: cross-sectional median / MAD standardisation\n    med = s_sm.groupby(level='date').transform('median')\n    mad = (s_sm - med).abs().groupby(level='date').transform('median')\n    alpha = (s_sm - med) / (mad + Eps)\n\n    # Step 9: availability gate on trailing observations\n    obs = data['close'].groupby(level='symbol').cumcount() + 1\n    alpha = alpha.where(obs >= Min_obs)\n\n    alpha = alpha.reindex(df.index)\n    alpha.name = 'alpha'\n    return alpha\n```",
+    "response_sha256": "33c7a66c7d8c2b3c6546eb977bbaa292dca48abcac93ea8dff3edae469c250d3",
+    "validation_flags": {
+        "missing_sections": [],
+        "code_block_found": true,
+        "code_parses": true,
+        "generate_alpha_defined": true,
+        "keyword_args": [
+            "N_ret",
+            "N_volbase",
+            "N_volshock",
+            "N_illiq",
+            "N_smooth",
+            "Min_obs",
+            "Z_clip",
+            "Eps"
+        ],
+        "has_keyword_args": true,
+        "negative_shift_present": false,
+        "forbidden_data_tokens": [],
+        "fidelity_watch_tokens": [
+            "clip"
+        ],
+        "syntax_error": null
+    },
+    "api_config_applied": {
+        "temperature": null,
+        "seed": null,
+        "seed_supported": false,
+        "seed_note": "no seed parameter exists on this API",
+        "reasoning_effort": "medium",
+        "tools": [],
+        "max_output_tokens": 16000,
+        "fallbacks": [
+            "temperature+effort: SDK rejected argument (Messages.create() got an unexpected keyword argument 'temperature')"
+        ],
+        "config_used": "effort_only"
+    },
+    "api_constraints": {
+        "seed_exposed": false,
+        "seed_note": "The Messages API exposes no seed parameter. This corpus is not replayable call-by-call. `intended_call_seed` records the planned value; `seed` is null because none was applied.",
+        "temperature_supported": true,
+        "temperature_range": "0.0-1.0",
+        "reasoning_control": "output_config.effort",
+        "determinism_note": "No provider guarantees determinism even at temperature 0. Reproducibility is best-effort."
+    },
+    "api_response_audit": {
+        "finish_reason": "end_turn",
+        "usage": {
+            "prompt_tokens": 1625,
+            "output_tokens": 4381,
+            "total_tokens": 6006
+        },
+        "grounding": {
+            "grounding_metadata_present": false,
+            "detail": null
+        },
+        "sdk_version": "1.0.0"
+    }
+}
