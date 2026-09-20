@@ -1,0 +1,6 @@
+alpha_id,verdict,events_tested,events_failed,step1_anomaly_flags,step2_differential_flags,step3_salience_gap_flags,step3_median_mdg,step3_max_gap_over_mdg,binding_failure_mode
+alpha_22470197,FAIL,15,2,3,2,1,0.04453672212332083,1.6635115579275825,"anomaly_and_salience_gap, step1_anomaly_and_control_differential"
+alpha_3c2f1bc5,FAIL,15,1,5,1,0,0.042326813357235794,0.911866389869134,step1_anomaly_and_control_differential
+alpha_96a96551,PASS,15,0,5,0,0,0.04141880475334658,1.491579017321598,none
+alpha_c1754043,PASS,15,0,2,0,0,0.039651592682276846,1.3674579371271771,none
+alpha_e31df18b,PASS,15,0,2,0,0,0.041483879439071544,1.2646745406704645,none

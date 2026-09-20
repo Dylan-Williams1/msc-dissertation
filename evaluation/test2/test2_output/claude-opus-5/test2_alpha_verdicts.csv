@@ -1,0 +1,11 @@
+alpha_id,verdict,events_tested,events_failed,step1_anomaly_flags,step2_differential_flags,step3_salience_gap_flags,step3_median_mdg,step3_max_gap_over_mdg,binding_failure_mode
+alpha_19bbb24b,FAIL,15,1,4,1,0,0.053000347739289286,1.087979659684601,step1_anomaly_and_control_differential
+alpha_50838e22,FAIL,15,1,3,1,0,0.038621686258517834,0.7789289632327903,step1_anomaly_and_control_differential
+alpha_5b9d327e,FAIL,15,1,1,1,0,0.04352102772893941,1.2145828663371014,step1_anomaly_and_control_differential
+alpha_6e31e302,FAIL,15,1,5,1,0,0.04847907717396396,0.833759689155363,step1_anomaly_and_control_differential
+alpha_72c354e4,FAIL,15,1,3,1,0,0.03832468844101624,0.7733002262385317,step1_anomaly_and_control_differential
+alpha_951423d0,FAIL,15,2,3,2,0,0.04308880229024606,0.7588074786074845,step1_anomaly_and_control_differential
+alpha_b38fe0a9,FAIL,15,1,5,1,0,0.04150650643448232,0.7915549708080063,step1_anomaly_and_control_differential
+alpha_e570ed13,PASS,15,0,2,0,0,0.041948523902310846,0.7620101483726539,none
+alpha_e9c23265,FAIL,15,1,4,1,0,0.04744857499752363,0.8829351960956474,step1_anomaly_and_control_differential
+alpha_f8ee3701,FAIL,15,1,7,1,0,0.04894467898241876,0.7634593234568509,step1_anomaly_and_control_differential

@@ -1,0 +1,8 @@
+alpha_id,verdict,events_tested,events_failed,step1_anomaly_flags,step2_differential_flags,step3_salience_gap_flags,step3_median_mdg,step3_max_gap_over_mdg,binding_failure_mode
+alpha_22470197,FAIL,15,2,4,2,1,0.04456379275115211,1.5768225212542308,"anomaly_and_salience_gap, step1_anomaly_and_control_differential"
+alpha_3c2f1bc5,FAIL,15,1,5,1,0,0.042035463300495166,0.802623246393968,step1_anomaly_and_control_differential
+alpha_78ebbccf,PASS,15,0,1,0,0,0.03815238472424808,0.6590375549918848,none
+alpha_96a96551,PASS,15,0,4,0,0,0.04416285816675902,1.0124475579194492,none
+alpha_9aab3d1e,FAIL,15,2,2,2,0,0.04037675373055161,1.507610460230493,step1_anomaly_and_control_differential
+alpha_c1754043,PASS,15,0,2,0,0,0.039678510211963294,1.2908833561939186,none
+alpha_e31df18b,PASS,15,0,2,0,0,0.040483971278442776,1.2178010544767026,none

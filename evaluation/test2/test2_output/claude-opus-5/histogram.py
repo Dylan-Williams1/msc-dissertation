@@ -1,0 +1,15 @@
+import pandas as pd, matplotlib.pyplot as plt, numpy as np
+ev = pd.read_csv("test2_events.csv")
+nc = ev.loc[ev["usable"], "narrative_consensus"].dropna()
+lo, hi = nc.quantile(0.25), nc.quantile(0.75)
+
+fig, ax = plt.subplots(figsize=(9, 4))
+ax.hist(nc, bins=20, color="0.75", edgecolor="white")
+ax.axvspan(nc.min(), lo, color="tab:blue", alpha=0.25)
+ax.axvspan(hi, nc.max(), color="tab:purple", alpha=0.25)
+ax.axvline(lo, color="0.3", lw=1); ax.axvline(hi, color="0.3", lw=1)
+ax.text(lo, ax.get_ylim()[1]*0.9, " obscure", ha="left", fontsize=10)
+ax.text(hi, ax.get_ylim()[1]*0.9, "famous ", ha="right", fontsize=10)
+ax.set_xlabel("narrative consensus"); ax.set_ylabel("episodes")
+ax.spines[["top","right"]].set_visible(False)
+fig.tight_layout(); fig.savefig("nc_histogram.png", dpi=200)
