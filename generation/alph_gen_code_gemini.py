@@ -211,10 +211,10 @@ No explanatory text should appear within Section 5. The final expression must ev
 # baseline. Report both, labelled.
 
 THEME_SPEC = [
-    "momentum",
-    "short-term reversal",
-    "long-term reversal",
-    "volatility",
+    #"momentum",
+    #"short-term reversal",
+    #"long-term reversal",
+    #"volatility",
     "liquidity",
     "trading volume",
     "nearness to the 52-week high",
