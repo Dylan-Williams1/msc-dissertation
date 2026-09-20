@@ -42,13 +42,13 @@ import pandas as pd
 # [SPEC] fixed by the specification.  [UNSPECIFIED] not fixed by it; these are
 # echoed at the end of every run so no assumption is silent.
 
-LLM_MODEL_TAG = "claude-opus-5"
+LLM_MODEL_TAG = "kakushadze-101-v1"
 CONTROL_MODEL_TAG = "kakushadze-101-v1"
 
 WINDOW = 21                    # [SPEC] 21-day window, stride 1
 DECLUSTER_GAP = 21             # [SPEC] jumps within 21 trading days collapse
 ANCHOR_START = "1990-01-02"    # [SPEC] temporal anchor
-ANCHOR_END = "2026-07-16"      # [SPEC] temporal anchor
+ANCHOR_END = "2026-09-09"      # [SPEC] temporal anchor
 SALIENCE_TOP_Q = 0.75          # [SPEC] top quartile = treatment
 SALIENCE_BOTTOM_Q = 0.25       # [SPEC] bottom quartile = candidate pool
 STEP1_PERCENTILE = 95.0        # [SPEC] 95th percentile anomaly threshold
@@ -901,45 +901,113 @@ class Test2:
         return df
 
 
-def plot_event_ic(engine, alpha_ids, llm_panel, event_date, outdir):
+def _ic_panel(ax, engine, alpha_ids, llm_panel, s, title):
+    """One event window: every alpha's raw IC in thin blue, CtrlMean in red."""
+    days = engine.calendar[s: s + WINDOW]
+    for aid in alpha_ids:
+        y = llm_panel[aid].reindex(engine.calendar).to_numpy(dtype=np.float64)
+        ax.plot(days, y[s: s + WINDOW], lw=0.7, alpha=0.5, color="tab:blue")
+    ax.plot(days, engine.ctrl_mean[s: s + WINDOW], lw=1.8, color="tab:red")
+    ax.axhline(0.0, lw=0.6, color="0.6")
+    ax.set_title(title, fontsize=8)
+    ax.tick_params(labelsize=6)
+    ax.set_xticks([days[0], days[len(days) // 2], days[-1]])
+    ax.set_xticklabels([str(d.date())[5:] for d in
+                        [days[0], days[len(days) // 2], days[-1]]], fontsize=6)
+
+
+def plot_event_ic(engine, alpha_ids, llm_panel, which, outdir):
     """
-    Raw diagnostic for a single event window: the alpha's own Rank IC against
-    CtrlMean, both untransformed.
+    Raw diagnostic: the alphas' own Rank IC against CtrlMean, both untransformed.
 
     d_bar = IC_alpha - beta*CtrlMean rises either because the alpha did well or
     because the control corpus did badly, and the differential alone cannot tell
     those apart. Plotting the two series separately does.
+
+    `which` is "high" (the 15 treatment events), "all" (every declustered
+    episode) or a single YYYY-MM-DD anchor date. Panels share a y-axis so
+    windows are directly comparable by eye.
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    ep = engine.episodes
-    hit = ep[ep["date"].astype(str).str.startswith(str(event_date))]
-    if hit.empty:
-        print(f"  [plot] no episode anchored on {event_date}")
-        return
-    s = int(hit.iloc[0]["window_start"])
-    if not (0 <= s < engine.n_windows):
-        print(f"  [plot] window for {event_date} is outside the calendar")
+    ep = engine.episodes[engine.episodes["usable"]].copy()
+    if which == "high":
+        sel, tag = ep[ep["salience"] == "high_salience"], "high"
+    elif which == "all":
+        sel, tag = ep, "all"
+    else:
+        sel = ep[ep["date"].astype(str).str.startswith(str(which))]
+        tag = str(which).replace("-", "")
+    sel = sel.sort_values("date")
+    sel = sel[(sel["window_start"] >= 0) & (sel["window_start"] < engine.n_windows)]
+    if sel.empty:
+        print(f"  [plot] no usable episode matching {which!r}")
         return
 
-    days = engine.calendar[s: s + WINDOW]
-    fig, ax = plt.subplots(figsize=(9, 4.5))
+    n = len(sel)
+    ncol = 1 if n == 1 else 3
+    nrow = int(np.ceil(n / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.0 * ncol, 2.4 * nrow),
+                             squeeze=False, sharey=True)
+    for ax in axes.ravel()[n:]:
+        ax.axis("off")
+
+    for ax, (_, e) in zip(axes.ravel(), sel.iterrows()):
+        sal = str(e.get("salience", ""))[:4]
+        _ic_panel(ax, engine, alpha_ids, llm_panel, int(e["window_start"]),
+                  f"{str(e['date'].date())}  {e['return']:+.1%}  [{sal}]")
+
+    axes.ravel()[0].plot([], [], lw=1.8, color="tab:red", label="CtrlMean")
+    axes.ravel()[0].plot([], [], lw=0.7, color="tab:blue", alpha=0.5, label="LLM alphas")
+    axes.ravel()[0].legend(frameon=False, fontsize=6, loc="upper left")
+    fig.suptitle("Raw daily Rank IC across event windows", fontsize=11)
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
+    path = os.path.join(outdir, f"test2_ic_{tag}.png")
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    print(f"  [plot] {path}  ({n} window{'s' if n != 1 else ''})")
+
+
+def plot_history(engine, alpha_ids, llm_panel, outdir):
+    """
+    Whole-sample context: 21-day rolling mean Rank IC for every alpha and for
+    CtrlMean, with the declustered episode windows shaded.
+
+    The event-window plots show what happened inside a shock; this shows whether
+    those windows are unusual against the alpha's own history. A spike that is
+    unremarkable on this chart is not evidence of anything.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    mid = engine.calendar[WINDOW // 2: WINDOW // 2 + engine.n_windows]
+    fig, ax = plt.subplots(figsize=(13, 4.5))
+
+    for s in engine.episodes.loc[engine.episodes["usable"], "window_start"]:
+        s = int(s)
+        if 0 <= s < engine.n_windows:
+            ax.axvspan(engine.calendar[s], engine.calendar[min(s + WINDOW - 1, engine.T - 1)],
+                       color="0.85", lw=0)
+
     for aid in alpha_ids:
         y = llm_panel[aid].reindex(engine.calendar).to_numpy(dtype=np.float64)
-        ax.plot(days, y[s: s + WINDOW], lw=0.9, alpha=0.55, color="tab:blue")
-    ax.plot(days, engine.ctrl_mean[s: s + WINDOW], lw=2.4, color="tab:red",
-            label="CtrlMean (control corpus)")
-    ax.plot([], [], lw=0.9, color="tab:blue", alpha=0.55, label="LLM alphas (raw IC)")
+        m, _ = rolling_window_mean(y, np.isfinite(y), WINDOW, MIN_WINDOW_OBS)
+        ax.plot(mid, m, lw=0.6, alpha=0.5, color="tab:blue")
+
+    cm = engine.ctrl_mean
+    m, _ = rolling_window_mean(cm, np.isfinite(cm), WINDOW, MIN_WINDOW_OBS)
+    ax.plot(mid, m, lw=1.4, color="tab:red", label="CtrlMean")
+    ax.plot([], [], lw=0.6, color="tab:blue", alpha=0.5, label="LLM alphas")
     ax.axhline(0.0, lw=0.7, color="0.6")
-    ax.set_title(f"Raw daily Rank IC around {event_date}")
+    ax.set_title("21-day rolling mean Rank IC, full sample (shaded: shock episodes)")
     ax.set_ylabel("Rank IC")
     ax.legend(frameon=False, fontsize=9)
-    fig.autofmt_xdate()
     fig.tight_layout()
-    path = os.path.join(outdir, f"test2_ic_{str(event_date).replace('-', '')}.png")
-    fig.savefig(path, dpi=150)
+    path = os.path.join(outdir, "test2_ic_history.png")
+    fig.savefig(path, dpi=130)
     plt.close(fig)
     print(f"  [plot] {path}")
 
@@ -999,8 +1067,11 @@ def main(argv=None):
     ap.add_argument("--outdir", default=OUTPUT_DIR)
     ap.add_argument("--llm-tag", default=LLM_MODEL_TAG)
     ap.add_argument("--control-tag", default=CONTROL_MODEL_TAG)
-    ap.add_argument("--plot-event", default=None,
-                    help="Anchor date (YYYY-MM-DD) to plot raw alpha IC vs CtrlMean.")
+    ap.add_argument("--no-plots", action="store_true",
+                    help="Skip the diagnostic figures (written by default).")
+    ap.add_argument("--plot-event", default=None, metavar="WHICH",
+                    help="Extra single-window figure for one YYYY-MM-DD anchor date. "
+                         "The 'high', 'all' and history figures are written regardless.")
     ap.add_argument("--all-alphas", action="store_true",
                     help="Evaluate every LLM alpha, not just Phase 1 survivors.")
     args = ap.parse_args(argv)
@@ -1105,8 +1176,19 @@ def main(argv=None):
     verdicts = synthesise(event_results)
     event_results.to_csv(os.path.join(args.outdir, "test2_event_results.csv"), index=False)
 
-    if args.plot_event:
-        plot_event_ic(engine, list(subjects), llm_panel, args.plot_event, args.outdir)
+    if not args.no_plots:
+        # Diagnostics are written every run: the differential alone cannot say
+        # whether an event window moved because the alpha did well or because
+        # the control corpus did badly, and these figures can.
+        try:
+            for which in ["high", "all"] + ([args.plot_event] if args.plot_event else []):
+                plot_event_ic(engine, list(subjects), llm_panel, which, args.outdir)
+            plot_history(engine, list(subjects), llm_panel, args.outdir)
+        except ImportError:
+            print("  [plot] matplotlib not installed; skipping figures "
+                  "(pip install matplotlib, or pass --no-plots to silence this)")
+        except Exception as exc:  # never let a figure kill a completed run
+            print(f"  [plot] skipped: {type(exc).__name__}: {exc}")
 
     g = (event_results.groupby("alpha_id")
          .agg(slope=("grad_slope", "first"), p=("grad_p", "first"),
