@@ -16,7 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # phase1_daily_rank_ic_<model_key>.csv, and it is not regenerated here.
 PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
 
-TREATMENT_KEY = "gpt-5.6-sol"        # basename of ALPHA_DIR
+TREATMENT_KEY = "biased_control"      # basename of ALPHA_DIR
 CONTROL_KEY = "kakushadze-101-v1"       # basename of CONTROL_DIR
 
 ROOT_DIR = os.path.dirname(PHASE1_IC_DIR)   # ...\Dissertation
