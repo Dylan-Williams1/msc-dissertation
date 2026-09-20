@@ -13,13 +13,14 @@ from scipy import stats
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Phase 1 already exported daily Rank IC per alpha as
-# phase1_daily_rank_ic_<model_key>.csv, and it is not regenerated here.
-PHASE1_IC_DIR = r"C:\University\Master's\Diss\Dissertation\evaluation"
+# phase1_daily_rank_ic_<model_key>.csv.
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+PHASE1_IC_DIR = os.path.join(REPO_ROOT, "evaluation", "initial_screening", "results")
 
-TREATMENT_KEY = "biased_control"      # basename of ALPHA_DIR
-CONTROL_KEY = "kakushadze-101-v1"       # basename of CONTROL_DIR
+TREATMENT_KEY = "claude-opus-5"
+CONTROL_KEY = "kakushadze-101-v1"
 
-ROOT_DIR = os.path.dirname(PHASE1_IC_DIR)   # ...\Dissertation
+ROOT_DIR = REPO_ROOT
 ALPHA_DIR = os.path.join(ROOT_DIR, "alphas", "survived", TREATMENT_KEY)
 CONTROL_DIR = os.path.join(ROOT_DIR, "alphas", "raw", CONTROL_KEY)
 
@@ -27,7 +28,7 @@ TREATMENT_IC_PATH = os.path.join(
     PHASE1_IC_DIR, f"phase1_daily_rank_ic_{TREATMENT_KEY}.csv")
 CONTROL_IC_PATH = os.path.join(
     PHASE1_IC_DIR, f"phase1_daily_rank_ic_{CONTROL_KEY}.csv")
-OUT_DIR = os.path.join(SCRIPT_DIR, "instrument1_output")
+OUT_DIR = os.path.join(SCRIPT_DIR, "test1_output", TREATMENT_KEY)
 
 # Model knowledge cutoffs are month-granularity. "2026-05" means the model
 # knows everything THROUGH May, so the OOS window opens on 1 June. Reading it
@@ -116,8 +117,7 @@ def compute_differentials(trt_ic, ctrl_ic, cutoff_date):
     for col in trt_ic.columns:
         trt_diffs[col] = trt_ic[col] - fit_beta(trt_ic[col], ctrl_mean) * ctrl_mean
 
-    # Controls are residualised leave-one-out so no control sits inside its own
-    # benchmark.
+    # Controls are residualised leave-one-out so no control sits inside its own benchmark.
     ctrl_diffs = pd.DataFrame(index=ctrl_ic.index, columns=ctrl_ic.columns,
                               dtype=float)
     for col in ctrl_ic.columns:
@@ -273,8 +273,7 @@ def run_pipeline(trt_ic, ctrl_ic, cutoff_date_str, end_date_str):
 
     # --- assemble ------------------------------------------------------------
     # The reference B for the pool statistic and the reported base/oos means.
-    # Taken as the MIDDLE of B_VALUES rather than whichever value the loop
-    # happened to finish on, which was an arbitrary artefact of tuple order.
+    # Taken as the MIDDLE of B_VALUES.
     B_ref = B_VALUES[len(B_VALUES) // 2]
     t_arr_ref, trt_ref = by_B[B_ref]
 

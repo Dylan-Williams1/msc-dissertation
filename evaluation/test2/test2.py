@@ -39,42 +39,39 @@ import pandas as pd
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-# [SPEC] fixed by the specification.  [UNSPECIFIED] not fixed by it; these are
-# echoed at the end of every run so no assumption is silent.
-
 LLM_MODEL_TAG = "gemini-3.6-flash-v5"
 CONTROL_MODEL_TAG = "kakushadze-101-v1"
 
-WINDOW = 21                    # [SPEC] 21-day window, stride 1
-DECLUSTER_GAP = 21             # [SPEC] jumps within 21 trading days collapse
-ANCHOR_START = "1990-01-02"    # [SPEC] temporal anchor
-ANCHOR_END = "2026-09-09"      # [SPEC] temporal anchor
-SALIENCE_TOP_Q = 0.75          # [SPEC] top quartile = treatment
-SALIENCE_BOTTOM_Q = 0.25       # [SPEC] bottom quartile = candidate pool
-STEP1_PERCENTILE = 95.0        # [SPEC] 95th percentile anomaly threshold
-ALPHA_LEVEL = 0.05             # [SPEC] one-sided p < 0.05
-FDR_ALPHA = 0.05               # [SPEC] Benjamini-Hochberg at 0.05
+WINDOW = 21                    # 21-day window, stride 1
+DECLUSTER_GAP = 21             # jumps within 21 trading days collapse
+ANCHOR_START = "1990-01-02"    # temporal anchor
+ANCHOR_END = "2026-09-09"      # temporal anchor
+SALIENCE_TOP_Q = 0.75          # top quartile = treatment
+SALIENCE_BOTTOM_Q = 0.25       # bottom quartile = candidate pool
+STEP1_PERCENTILE = 95.0        # 95th percentile anomaly threshold
+ALPHA_LEVEL = 0.05             # one-sided p < 0.05
+FDR_ALPHA = 0.05               # Benjamini-Hochberg at 0.05
 
-# [UNSPECIFIED] 21 is odd, so centering is the only symmetric placement of the
+# 21 is odd, so centering is the only symmetric placement of the
 # window about the anchor day: [t-10, t+10].
 EVENT_WINDOW_ANCHOR = "centered"
 
-# [UNSPECIFIED] Minimum usable days inside a window for it to yield a statistic.
+# Minimum usable days inside a window for it to yield a statistic.
 MIN_WINDOW_OBS = 15
 
-# [UNSPECIFIED] The workbook holds two US jump tables with identical `clarity`
+# The workbook holds two US jump tables with identical `clarity`
 # but different `JournalistConfidence` (WSJ coders vs all papers).
 BBDS_SHEET = "jumps by day (wsj)"
 
-# [UNSPECIFIED] Narrative Consensus functional form. The two BBDS metrics are on
+# Narrative Consensus functional form. The two BBDS metrics are on
 # incomparable scales (clarity is a PCA index, JournalistConfidence a 1-3 coder
 # average), so each is z-scored across episodes and averaged with equal weight.
 NC_WEIGHTS = {"clarity": 0.5, "JournalistConfidence": 0.5}
 
-# [UNSPECIFIED] Mahalanobis caliper. Must be pre-specified, no value given.
+# Mahalanobis caliper. Must be pre-specified, no value given.
 MAHALANOBIS_CALIPER = 1.0
 
-# [UNSPECIFIED] Permutation count and seed for the Salience Gap Test.
+# Permutation count and seed for the Salience Gap Test.
 N_PERMUTATIONS = 10000
 PERMUTATION_SEED = 20260716
 
@@ -217,7 +214,7 @@ def benjamini_hochberg(pvals, alpha):
     """
     Benjamini-Hochberg step-up FDR control. Returns (reject, qvalue), NaN-safe.
 
-    Spec: because certification requires failing to reject the null, the FDR
+    Because passing requires failing to reject the null, the FDR
     penalty actively protects alphas from being falsely rejected due to
     single-event noise. That direction is why it is applied within an alpha
     across its events.
@@ -470,10 +467,6 @@ def score_salience(episodes):
     """
     Narrative Consensus from the BBDS clarity and JournalistConfidence metrics,
     then the top and bottom quartiles.
-
-    Note for the write-up: JournalistConfidence is top-coded at 3.0 for a large
-    share of post-1990 jumps, so at the top of the distribution the composite is
-    close to clarity-driven.
     """
     e = episodes.copy()
     nc = np.zeros(len(e), dtype=np.float64)
@@ -549,7 +542,7 @@ class Test2:
         finite = np.isfinite(ctrl)
 
         # CtrlMean(t): equal-weighted mean daily Rank IC across the retained
-        # control corpus. No sign orientation is applied (spec).
+        # control corpus. No sign orientation is applied.
         total = np.nansum(np.where(finite, ctrl, 0.0), axis=1)
         count = finite.sum(axis=1).astype(np.float64)
         self.ctrl_mean = np.full(self.T, np.nan)
@@ -874,19 +867,10 @@ class Test2:
 
             # Unified rule across both scenarios: (Step 1 AND Step 2) OR Step 3.
             #
-            # The conjunction is the anomaly arm. Step 1 (unpaired, against the
-            # human control window distribution) and Step 2 (paired, against the
-            # alpha's own placebo windows) are distinct statistics with distinct
-            # nulls, but both compare an event window to a NON-event baseline, so
-            # both detect crisis sensitivity rather than narrative salience.
-            # Requiring them jointly raises the bar on that non-identifying
-            # evidence; it does not make it identifying.
-            #
             # Step 3 is the identifying arm. It is the only comparison that holds
             # structural severity fixed and varies only fame, so it stands alone.
             # In Scenario A it is unavailable, and the rule degenerates to the
-            # conjunction - which is why Scenario A failures are anomalies of
-            # unattributable cause, not demonstrated memorisation.
+            # conjunction.
             anom = bool(r["step1_anomaly"] and r["step2_sig_positive"])
             gap = bool(r["step3_sig_positive"])  # always False in Scenario A
 
@@ -1027,8 +1011,7 @@ def synthesise(event_results):
         binding_failure_mode         which rule actually bound, over failed events
 
     A Test 2 PASS is the absence of affirmative evidence of event-level
-    memorisation. It is not certification, which is a joint claim across Gate 0
-    and every mechanism test.
+    memorisation.
     """
     out = []
     for alpha_id, g in event_results.groupby("alpha_id", sort=False):
@@ -1152,8 +1135,6 @@ def main(argv=None):
           f"{int(engine.placebo_allowed.sum())} placebo windows.")
     print(f"  Counts are high-salience events flagged, out of {n_high}. An alpha fails only")
     print("  where (Step 1 AND Step 2) OR Step 3 binds, so flags alone are not failures.")
-    print("  Step 3 is unavailable in Scenario A, so those failures bind on the")
-    print("  conjunction alone and are anomalies of unattributable cause.\n")
     print(f"  {'alpha':<30}{'Step 1':>9}{'Step 2':>9}{'Step 3':>9}   verdict")
     print(f"  {'':<30}{'anomaly':>9}{'differ.':>9}{'sal. gap':>9}")
 
