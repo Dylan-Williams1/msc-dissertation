@@ -42,7 +42,7 @@ import pandas as pd
 # [SPEC] fixed by the specification.  [UNSPECIFIED] not fixed by it; these are
 # echoed at the end of every run so no assumption is silent.
 
-LLM_MODEL_TAG = "kakushadze-101-v1"
+LLM_MODEL_TAG = "gemini-3.6-flash-v5"
 CONTROL_MODEL_TAG = "kakushadze-101-v1"
 
 WINDOW = 21                    # [SPEC] 21-day window, stride 1
@@ -106,12 +106,13 @@ BBDS_CATEGORY_LABELS = {
 }
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 DATA_DIR = os.path.join(REPO_ROOT, "data")
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, "test2_output")
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "test2_output", LLM_MODEL_TAG)
 PARQUET_PATH = os.path.join(DATA_DIR, "daily_ohlcv.parquet")
 BBDS_PATH = os.path.join(DATA_DIR, "WSJ_Stock_Jumps.xlsx")
-SEARCH_DIRS = (SCRIPT_DIR, os.getcwd(), DATA_DIR, REPO_ROOT)
+SCREENING_DIR = os.path.join(REPO_ROOT, "evaluation", "initial_screening", "results")
+SEARCH_DIRS = (SCRIPT_DIR, SCREENING_DIR, os.getcwd(), DATA_DIR, REPO_ROOT)
 
 UNSPECIFIED = [
     ("EVENT_WINDOW_ANCHOR", EVENT_WINDOW_ANCHOR, "window placement about the anchor day"),
