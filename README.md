@@ -1,8 +1,6 @@
-# msc-dissertation
-
 # Evaluating Memorisation in LLM-Generated Quantitative Trading Alphas
 
-MSc dissertation. Dylan Williams (2521133), supervised by Dr Jia Shao.
+MSc dissertation. Dylan Williams (2521133).
 
 Three LLMs generate formulaic S&P 500 alphas. Those alphas are screened on
 Deflated Sharpe Ratio, then tested for two kinds of memory contamination:
@@ -32,6 +30,17 @@ Corpus tags are `claude-opus-5`, `gemini-3.6-flash-v5`, `gpt-5.6-sol`,
 `kakushadze-101-v1` (human control) and `biased_control` (synthetic leaked
 control).
 
+## Data
+
+`data/` holds the market data both stages read. Included here for reproduction
+of this dissertation only; neither dataset is my own work.
+
+| File | Source |
+|---|---|
+| `daily_ohlcv.parquet` | Daily S&P 500 OHLCV, 1990–2026, pulled from Yahoo Finance via `yfinance` with `auto_adjust=False`. Pull date, date range and the full 503-symbol list are in `daily_ohlcv_meta.json`. The symbol list is the index as constituted in September 2026, so the panel carries survivorship bias. |
+| `WSJ_Stock_Jumps.xlsx` | Baker, Bloom, Davis & Sammon, *What Triggers Stock Market Jumps?*, NBER Working Paper 28687 (2021). Coding data published by the authors at https://www.stockmarketjumps.com/data/. Test 2 reads the `jumps by day (wsj)` and `key_passages` sheets. Coding ends 30 November 2022, so Test 2 is silent on the final four years of the panel. |
+| `constituents.csv` | Index membership, used by Phase 1's universe filter. |
+
 ## Setup
 
 ```bash
@@ -40,9 +49,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Python 3.10+. Four data files are needed in `data/` and are not committed
-(licensing and size): `daily_ohlcv.parquet`, `meta.json`, `constituents.csv`,
-`WSJ_Stock_Jumps.xlsx`.
+Python 3.10+.
 
 ## Running the pipeline
 
@@ -82,9 +89,6 @@ python evaluation/test2/test2.py
 Flags alphas that perform suspiciously well during famous market shocks.
 Outputs to `test2_output/<tag>/`. Pass `--no-plots` to skip the figures.
 
-Test 2 needs `daily_ohlcv.parquet`. Without it the run still completes, but
-every event falls back to Scenario A and the results are not interpretable.
-
 ## Alpha generation
 
 `generation/alph_gen_code_claude.py`, `_gemini.py` and `_gpt.py` call each
@@ -92,10 +96,10 @@ provider's API with the shared v4.0 prompt, 24 alphas per model, writing one
 JSON to `alphas/raw/` per call. They are here so the generation process can be
 inspected. Re-running them needs `CLAUDE_API_KEY`, `GEMINI_API_KEY` and
 `OPENAI_API_KEY` in a `.env`, costs money, and may not reproduce the committed
-corpus exactly — temperature is 0.9 and no provider exposes a usable seed. Each alpha
-JSON carries the full provenance of its own generation, including the applied
-temperature, knowledge cutoff and prompt hashes; failed calls are recorded too,
-so attempts always equal artefacts.
+corpus exactly — temperature is 0.9 and no provider exposes a usable seed. Each
+alpha JSON carries the full provenance of its own generation, including the
+applied temperature, knowledge cutoff and prompt hashes; failed calls are
+recorded too, so attempts always equal artefacts.
 
 ## Other files
 
