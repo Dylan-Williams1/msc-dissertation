@@ -39,7 +39,7 @@ import pandas as pd
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-LLM_MODEL_TAG = "gemini-3.6-flash-v5"
+LLM_MODEL_TAG = "claude-opus-5"
 CONTROL_MODEL_TAG = "kakushadze-101-v1"
 
 WINDOW = 21                    # 21-day window, stride 1
