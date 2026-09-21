@@ -141,7 +141,7 @@ EMPTY_IC = dict(ic_n_days=0, mean_rank_ic=np.nan, ic_std=np.nan,
                 ic_information_ratio=np.nan)
 
 # =========================================================
-# 1. LOAD & CLEAN DATA (previously a separate script)
+# 1. LOAD & CLEAN DATA 
 # =========================================================
 
 # --- Core price data ---
@@ -190,7 +190,7 @@ else:
 # Navigate up one level from 'evaluation', then into 'alphas/raw/<TARGET_MODEL>'
 output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "alphas", "raw", TARGET_MODEL)
 results = []
-ic_series_by_alpha = {}   # keep the daily series - this is Instrument 1's input
+ic_series_by_alpha = {}   # keep the daily series - this is used for test 1 and test 2
 alpha_id_to_path = {}     # alpha_id -> source JSON path, used to export survivors below
 
 # Look for all .json files directly inside that specific folder
@@ -207,7 +207,7 @@ if len(json_files) == 0:
 
 # --- Pre-scan pass: count trials PER MODEL, not pooled across the folder ---
 # Each model's DSR must be deflated against the number of alphas generated
-# for THAT model (~20), since that's the actual search space it was drawn
+# for THAT model (~24), since that's the actual search space it was drawn
 # from. Pooling across models would understate/overstate the correction
 # depending on how many models happen to share this folder.
 trials_per_model = {}
@@ -359,8 +359,7 @@ df_results = pd.DataFrame(results)
 csv_output_path = "phase1_screening_results_" + TARGET_MODEL + ".csv"
 df_results.to_csv(csv_output_path, index=False)
 
-# Daily IC series, one column per alpha. This is the raw material for the
-# Instrument 1 break tests - keep it, it is expensive to regenerate.
+# Daily IC series, one column per alpha.
 if ic_series_by_alpha:
     ic_panel = pd.DataFrame(ic_series_by_alpha).sort_index()
     ic_panel.index.name = "date"

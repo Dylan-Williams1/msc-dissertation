@@ -97,9 +97,8 @@ period is reported as roughly 0.6-6.4 days
 
 # Section 2: Mathematical Formulation
 
-Reference specification, restated as an ordered step decomposition. This is the \
-object against which the Section 5 code is audited under the Code-Documentation \
-Fidelity gate. The canonical single-line expression is Alpha#{n} of {SOURCE['appendix']} \
+Reference specification, restated as an ordered step decomposition.
+The canonical single-line expression is Alpha#{n} of {SOURCE['appendix']} \
 in the source publication; it is cited rather than reproduced here ({SOURCE['rights_note']}).
 
 {step_lines}

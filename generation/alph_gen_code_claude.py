@@ -1,11 +1,6 @@
 """
 Stage 1 alpha generation — Anthropic arm.
 
-Compliance targets:
-  - Master doc Section 5   (mandatory machine-readable metadata block)
-  - Master doc Section 3b  (generation protocol & provenance disclosures)
-  - Master doc Section 6   (technical data spec; close-t / execute-t+1-open)
-
 Design invariant: THIS SCRIPT NEVER DISCARDS A GENERATION.
 Every API call produces exactly one artifact on disk — a success record or a
 failure record. Validation flags problems in metadata; it never filters. Any
@@ -30,9 +25,7 @@ Usage:
     python alph_gen_code_claude.py
 
 Requires CLAUDE_API_KEY in a .env file next to this script (ANTHROPIC_API_KEY is
-also accepted, since that is the name the SDK itself uses). Never hardcode a key
-in source, never paste one into chat, and rotate immediately if one is ever
-exposed either way.
+also accepted, since that is the name the SDK itself uses).
 """
 
 import os
@@ -58,25 +51,16 @@ except ImportError:
 
 MODEL_NAME = "claude-opus-5"
 PROVIDER = "Anthropic"
-INTERFACE = "API"                 # Section 3b: browser interfaces are prohibited
+INTERFACE = "API"       
 TEMPERATURE = 0.9
 N_SAMPLES_PER_PROMPT = 1          # one draw kept per call; no best-of selection
 SELECTION_APPLIED = False         # invariant enforced by the no-discard rule
 RETRIEVAL_AUGMENTATION_ENABLED = False
 REASONING_EFFORT = "medium"       # recorded: affects reproducibility and cost
 MASTER_SEED = 20260716            # per-call seeds derived from this, all recorded
-MAX_OUTPUT_TOKENS = 16000         # truncation would silently corrupt Section 5
+MAX_OUTPUT_TOKENS = 16000
 RATE_LIMIT_SLEEP = 2              # seconds between calls
 API_KEY_ENV_VAR = "CLAUDE_API_KEY"   # ANTHROPIC_API_KEY accepted as a fallback
-
-# COST NOTE. Thinking tokens are billed as output. On this prompt expect roughly
-# 5,500-7,000 billable output tokens per call once reasoning is included, which
-# at Opus 5 rates ($5/$25 per MTok) puts the 24-call plan near $3.85. The
-# MAX_OUTPUT_TOKENS ceiling above allows a worst case of about $9.70 if every
-# call ran to the cap. For a cheaper run, claude-sonnet-5 ($2/$10) costs roughly
-# $1.54 for the same plan — but its knowledge cutoff is 2026-01, not 2026-05, so
-# Section 2 MUST be updated with it. The cutoff is a treatment variable, not a
-# label.
 
 # N_ALPHAS is NOT set here. It is defined by CALL_PLAN in section 4b so that the
 # planned call count and the theme cell structure cannot drift apart.
@@ -108,8 +92,7 @@ API_CONSTRAINT_NOTES = [
 # ---------------------------------------------------------------------------
 # 2. KNOWLEDGE CUTOFF — THE TREATMENT VARIABLE
 # ---------------------------------------------------------------------------
-# This is not bookkeeping. Any test that locates a structural break AT this date
-# is invalidated by an incorrect value.
+# Any test that locates a structural break AT this date is invalidated by an incorrect value.
 #
 # Take it from the official provider documentation ONLY. Third-party aggregators
 # disagree with the primary source for several models. Documentation is revised,
@@ -119,9 +102,6 @@ API_CONSTRAINT_NOTES = [
 # interval recorded below:
 #   reliable knowledge cutoff -> LOWER  (knowledge most extensive and reliable)
 #   training data cutoff      -> UPPER  (broader range of training data used)
-# For this model the two coincide, so the interval is degenerate — a point, not
-# a range. State that in the write-up rather than implying a precision the other
-# corpora in the study may not share.
 
 MODEL_KNOWLEDGE_CUTOFF = "2026-05"           # VERIFY against the docs before running
 MODEL_KNOWLEDGE_CUTOFF_LOWER = "2026-05"     # reliable knowledge cutoff
@@ -248,12 +228,6 @@ No explanatory text should appear within Section 5. The final expression must ev
 #   trading volume                Gervais, Kaniel & Mingelgrin (2001)
 #   nearness to the 52-week high  George & Hwang (2004)
 #   beta                          Frazzini & Pedersen (2014)
-#
-# DISCLOSURE (governs Stage 4): naming canonical anomalies points generation at
-# the Benchmark Leakage comparison corpus, and bare canonical labels are
-# stronger recall triggers than descriptive phrasing would be. This corpus's
-# leakage rate is therefore CONDITIONAL and is not an unbiased estimate of
-# unsteered model behaviour.
 
 THEME_SPEC = [
     "momentum",
@@ -432,8 +406,7 @@ def call_model(client, model, user_prompt, call_seed):
     distinguish "set to X" from "asked for X and it was ignored".
 
     No tools are requested, and the response is separately inspected for
-    tool-use blocks. Section 3b requires positive confirmation that no retrieval
-    augmentation ran, and omitting the tools argument is not confirmation.
+    tool-use blocks.
 
     The call ladder degrades one control at a time if the API rejects a
     combination, recording each fallback rather than hiding it.
@@ -622,8 +595,7 @@ def main(argv=None):
 
             if audit["grounding"]["grounding_metadata_present"]:
                 # Effective cutoff is now the GENERATION DATE, and every
-                # look-ahead test applied to this alpha is void. Quarantine, do
-                # not silently keep.
+                # look-ahead test applied to this alpha is void.
                 metadata["generation_status"] = "quarantined_retrieval_detected"
                 metadata["retrieval_augmentation_enabled"] = True
                 print("   !! TOOL / RETRIEVAL EVIDENCE PRESENT — QUARANTINED")
@@ -705,9 +677,7 @@ def main(argv=None):
     # -----------------------------------------------------------------------
     # 8. RUN MANIFEST
     # -----------------------------------------------------------------------
-    # The manifest is the auditable record that attempts == artifacts. It is
-    # what you cite in the write-up when asserting that no selection occurred
-    # between generation and storage.
+    # The manifest is the auditable record that attempts == artifacts.
 
     hashes = [r["response_sha256"] for r in run_records if r["response_sha256"]]
     duplicate_hashes = len(hashes) - len(set(hashes))

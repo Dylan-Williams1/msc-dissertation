@@ -1,11 +1,6 @@
 """
 Stage 1 alpha generation — OpenAI arm.
 
-Compliance targets:
-  - Master doc Section 5   (mandatory machine-readable metadata block)
-  - Master doc Section 3b  (generation protocol & provenance disclosures)
-  - Master doc Section 6   (technical data spec; close-t / execute-t+1-open)
-
 Design invariant: THIS SCRIPT NEVER DISCARDS A GENERATION.
 Every API call produces exactly one artifact on disk — a success record or a
 failure record. Validation flags problems in metadata; it never filters. Any
@@ -38,8 +33,7 @@ Usage:
     python alph_gen_code_gpt.py --dry-run        # plan only, spends nothing
     python alph_gen_code_gpt.py
 
-Requires OPENAI_API_KEY in a .env file next to this script (never hardcode it in
-source, never paste it into chat, rotate immediately if it is ever exposed).
+Requires OPENAI_API_KEY in a .env file next to this script.
 """
 
 import os
@@ -65,14 +59,14 @@ except ImportError:
 
 MODEL_NAME = "gpt-5.6-sol"
 PROVIDER = "OpenAI"
-INTERFACE = "API"                 # Section 3b: browser interfaces are prohibited
+INTERFACE = "API"
 TEMPERATURE = 0.9                 # applied ONLY when PARITY_MODE == "temperature"
 N_SAMPLES_PER_PROMPT = 1          # one draw kept per call; no best-of selection
 SELECTION_APPLIED = False         # invariant enforced by the no-discard rule
 RETRIEVAL_AUGMENTATION_ENABLED = False
 REASONING_EFFORT = "medium"       # applied ONLY when PARITY_MODE == "effort"
 MASTER_SEED = 20260716            # per-call seeds derived from this, all recorded
-MAX_OUTPUT_TOKENS = 16000         # truncation would silently corrupt Section 5
+MAX_OUTPUT_TOKENS = 16000
 RATE_LIMIT_SLEEP = 2              # seconds between calls
 
 # THE CHOICE. See the module docstring. "effort" is recommended.
@@ -80,13 +74,6 @@ PARITY_MODE = "effort"            # "effort" | "temperature"
 
 if PARITY_MODE not in ("effort", "temperature"):
     raise ValueError('PARITY_MODE must be "effort" or "temperature"')
-
-# COST NOTE. Reasoning tokens are billed as output. On this prompt expect
-# roughly 5,500-7,000 billable output tokens per call, which at gpt-5.6 rates
-# ($5/$30 per MTok) puts the 24-call plan near $4.60. The MAX_OUTPUT_TOKENS
-# ceiling allows a worst case near $11.60 if every call ran to the cap. Cheaper
-# tiers exist (gpt-5.6-terra, gpt-5.6-luna) but share the same knowledge cutoff,
-# so only MODEL_NAME needs changing for those.
 
 # N_ALPHAS is NOT set here. It is defined by CALL_PLAN in section 4b so that the
 # planned call count and the theme cell structure cannot drift apart.
@@ -125,18 +112,17 @@ API_CONSTRAINT_NOTES = [
 # ---------------------------------------------------------------------------
 # 2. KNOWLEDGE CUTOFF — THE TREATMENT VARIABLE
 # ---------------------------------------------------------------------------
-# This is not bookkeeping. Any test that locates a structural break AT this date
+# Any test that locates a structural break AT this date
 # is invalidated by an incorrect value.
 #
-# Take it from the official provider documentation ONLY. Third-party aggregators
+# Taken from the official provider documentation ONLY. Third-party aggregators
 # disagree with the primary source for several models. Documentation is revised,
 # so the retrieval date is recorded alongside the value.
 #
 # OpenAI publishes a single exact date (16 February 2026 for this model family),
 # recorded to the month here for consistency with the rest of the schema. LOWER
 # equals UPPER because no interval is published — the value is a point, not a
-# range. State that in the write-up rather than implying a precision the other
-# corpora in the study may not share.
+# range.
 
 MODEL_KNOWLEDGE_CUTOFF = "2026-02"           # VERIFY against the docs before running
 MODEL_KNOWLEDGE_CUTOFF_LOWER = "2026-02"
@@ -261,12 +247,6 @@ No explanatory text should appear within Section 5. The final expression must ev
 #   trading volume                Gervais, Kaniel & Mingelgrin (2001)
 #   nearness to the 52-week high  George & Hwang (2004)
 #   beta                          Frazzini & Pedersen (2014)
-#
-# DISCLOSURE (governs Stage 4): naming canonical anomalies points generation at
-# the Benchmark Leakage comparison corpus, and bare canonical labels are
-# stronger recall triggers than descriptive phrasing would be. This corpus's
-# leakage rate is therefore CONDITIONAL and is not an unbiased estimate of
-# unsteered model behaviour.
 
 THEME_SPEC = [
     "momentum",
@@ -435,9 +415,7 @@ def call_model(client, model, user_prompt, call_seed):
     One Responses call.
 
     Returns (raw_text, applied, audit) where `applied` records what the API
-    ACTUALLY accepted, never what was requested. The write-up must be able to
-    state the sampling configuration truthfully, which means the artifact has to
-    distinguish "set to X" from "asked for X and it was ignored".
+    ACTUALLY accepted, never what was requested.
 
     tools=[] and store=False are passed EXPLICITLY: no web search, no file
     search, no server-side retention. Section 3b requires positive confirmation
@@ -729,9 +707,8 @@ def main(argv=None):
     # -----------------------------------------------------------------------
     # 8. RUN MANIFEST
     # -----------------------------------------------------------------------
-    # The manifest is the auditable record that attempts == artifacts. It is
-    # what you cite in the write-up when asserting that no selection occurred
-    # between generation and storage.
+    # The manifest is the auditable record that attempts == artifacts,
+    # no selection occurred between generation and storage.
 
     hashes = [r["response_sha256"] for r in run_records if r["response_sha256"]]
     duplicate_hashes = len(hashes) - len(set(hashes))

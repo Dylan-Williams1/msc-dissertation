@@ -1,11 +1,6 @@
 """
 Stage 1 alpha generation — Gemini arm.
 
-Compliance targets:
-  - Master doc Section 5   (mandatory machine-readable metadata block)
-  - Master doc Section 3b  (generation protocol & provenance disclosures)
-  - Master doc Section 6   (technical data spec; close-t / execute-t+1-open)
-
 Design invariant: THIS SCRIPT NEVER DISCARDS A GENERATION.
 Every API call produces exactly one artifact on disk — a success record or a
 failure record. Validation flags problems in metadata; it never filters. Any
@@ -37,8 +32,7 @@ api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     raise EnvironmentError(
         "GEMINI_API_KEY not set. Put GEMINI_API_KEY=<your_key> in a .env file "
-        "next to this script (never hardcode it in source, never paste it 1into "
-        "chat, and rotate immediately if it is ever exposed either way)."
+        "next to this script."
     )
 
 # ---------------------------------------------------------------------------
@@ -47,7 +41,7 @@ if not api_key:
 
 MODEL_NAME = "gemini-3.6-flash"
 PROVIDER = "Google"
-INTERFACE = "API"                 # Section 3b: browser interfaces are prohibited
+INTERFACE = "API"
 TEMPERATURE = 0.9
 N_SAMPLES_PER_PROMPT = 1          # one draw kept per call; no best-of selection
 SELECTION_APPLIED = False         # invariant enforced by the no-discard rule
@@ -61,13 +55,11 @@ MASTER_SEED = 20260716            # per-call seeds derived from this, all record
 # ---------------------------------------------------------------------------
 # 2. KNOWLEDGE CUTOFF — THE TREATMENT VARIABLE
 # ---------------------------------------------------------------------------
-# This is not bookkeeping. Instrument 1 tests for a structural break AT this
-# date, so an incorrect value invalidates the entire Memory Contamination test.
-#
+# Test 1 tests for a structural break AT this date, so an incorrect value
+# invalidates the entire Parametric Look-ahead bias test.
 # Take it from the official model card ONLY. Third-party aggregators disagree
 # with Google's own documentation for this model. Model cards are revised, so
 # the retrieval date is recorded alongside the value.
-#
 # If the model card states a RANGE or a dual cutoff (e.g. "March 2026, though
 # in some domains limited to January 2025"), the break date is an interval, not
 # a point. Record both bounds and treat the ambiguity as a stated limitation of
@@ -75,7 +67,7 @@ MASTER_SEED = 20260716            # per-call seeds derived from this, all record
 
 MODEL_KNOWLEDGE_CUTOFF = "2026-03"           # VERIFY against the model card before running
 MODEL_KNOWLEDGE_CUTOFF_LOWER = "2025-01"     # earliest plausible cutoff
-MODEL_KNOWLEDGE_CUTOFF_UPPER = "2026-03"     # latest plausible cutoff; widen if dual-stated
+MODEL_KNOWLEDGE_CUTOFF_UPPER = "2026-03"     # latest plausible cutoff
 MODEL_KNOWLEDGE_CUTOFF_SOURCE = (
     "https://deepmind.google/models/model-cards/gemini-3-6-flash/"
 )
@@ -85,7 +77,7 @@ MODEL_KNOWLEDGE_CUTOFF_RETRIEVED_UTC = "2026-07-30"
 if MODEL_KNOWLEDGE_CUTOFF is None:
     raise ValueError(
         "model_knowledge_cutoff must be set from the official model card. "
-        "It is the treatment variable for Instrument 1."
+        "It is the treatment variable for Test 1."
     )
 
 # ---------------------------------------------------------------------------
@@ -102,20 +94,16 @@ os.makedirs(RUN_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 # 4. PROMPTS
 # ---------------------------------------------------------------------------
-# Changes from v1.0, each tied to a spec requirement:
+# Each prompt is content-hashed and the hash is written into every artifact, so
+# the prompt version recorded in metadata is verifiable rather than merely
+# asserted. Requirements encoded here, each tied to a spec requirement:
 #   - Section 1 must declare parameters with default values (Section 5 schema).
-#   - Section 4 execution rule fixed to t+1 OPEN. The previous "open or close"
-#     wording let the model choose, which breaks the Zhang et al. one-switch
-#     clean reference protocol.
+#   - Section 4 execution rule fixed to t+1 OPEN. Leaving the model to choose
+#     "open or close" would break the one-switch clean reference protocol.
 #   - Section 5 signature must expose parameters as keyword arguments.
 #   - Explicit prohibition on undeclared imputation, so that Code-Documentation
 #     Fidelity failures are genuine drift rather than an artefact of the prompt
 #     never asking for the behaviour to be stated.
-#
-# SYSTEM PROMPT IS HELD AT v3.0 AND IS BYTE-IDENTICAL TO THE v3.0 ARM.
-# Theme conditioning is the single toggle relative to that arm, so the system
-# prompt version must NOT be bumped: its sha256 is unchanged and the metadata
-# must say so. Only the user prompt advances to v4.0.
 
 SYSTEM_PROMPT_VERSION = "v4.0"
 USER_PROMPT_VERSION = "v4.0"
@@ -180,13 +168,13 @@ No explanatory text should appear within Section 5. The final expression must ev
 # 4b. THEME CONDITIONING (user prompt v4.0)
 # ---------------------------------------------------------------------------
 # PRE-REGISTERED. Frozen before generation; no theme added, removed, or
-# reworded after any output was seen. THEME_SPEC_SHA256 pins this, so the
-# claim is checkable rather than merely asserted.
+# reworded after any output was seen. THEME_SPEC_SHA256 pins this, so the claim
+# is checkable rather than merely asserted.
 #
 # The eight themes are the price- and volume-derived anomalies of the standard
-# cross-sectional asset pricing literature that are computable from OHLCV
-# alone. Fundamentals-based factors (value, size, quality, investment,
-# profitability) are absent because the data tier excludes them, not by choice.
+# cross-sectional asset pricing literature that are computable from OHLCV alone.
+# Fundamentals-based factors (value, size, quality, investment, profitability)
+# are absent because the data tier excludes them, not by choice.
 #
 # The prompt's ENTIRE theme contribution is the theme title. No description, no
 # construction guidance, no operations named. The construction remains the
@@ -202,19 +190,12 @@ No explanatory text should appear within Section 5. The final expression must ev
 #   trading volume                Gervais, Kaniel & Mingelgrin (2001)
 #   nearness to the 52-week high  George & Hwang (2004)
 #   beta                          Frazzini & Pedersen (2014)
-#
-# DISCLOSURE (governs Stage 4): naming canonical anomalies points generation at
-# the Benchmark Leakage comparison corpus, and bare canonical labels are
-# stronger recall triggers than descriptive phrasing would be. The themed arm's
-# leakage rate is therefore CONDITIONAL and is not an unbiased estimate of
-# unsteered model behaviour. The v2.0/v3.0 unconditioned arms supply that
-# baseline. Report both, labelled.
 
 THEME_SPEC = [
-    #"momentum",
-    #"short-term reversal",
-    #"long-term reversal",
-    #"volatility",
+    "momentum",
+    "short-term reversal",
+    "long-term reversal",
+    "volatility",
     "liquidity",
     "trading volume",
     "nearness to the 52-week high",
@@ -365,7 +346,7 @@ def build_config(seed: int):
     """
     Build the generation config, recording what was actually applied.
 
-    tools=[] is passed EXPLICITLY. Section 3b requires positive confirmation
+    tools=[] is passed EXPLICITLY. We require positive confirmation
     that no retrieval augmentation ran, and omitting the argument is not
     confirmation. The response is separately checked for grounding metadata.
     """
@@ -572,9 +553,8 @@ for i, (theme_id, theme_title, user_prompt) in enumerate(CALL_PLAN):
 # ---------------------------------------------------------------------------
 # 8. RUN MANIFEST
 # ---------------------------------------------------------------------------
-# The manifest is the auditable record that attempts == artifacts. It is what
-# you cite in the write-up when asserting that no selection occurred between
-# generation and storage.
+# The manifest is the auditable record that attempts == artifacts,
+# no selection occurred between generation and storage.
 
 hashes = [r["response_sha256"] for r in run_records if r["response_sha256"]]
 duplicate_hashes = len(hashes) - len(set(hashes))
